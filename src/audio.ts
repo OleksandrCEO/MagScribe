@@ -14,15 +14,37 @@ const ffmpegPath = app.isPackaged
   ? path.join(process.resourcesPath, binaryName)
   : path.join(app.getAppPath(), 'node_modules', 'ffmpeg-static', binaryName);
 
-/** Runs ffmpeg to completion; stdout goes to `onData`, a non-zero exit becomes an error carrying stderr's tail. */
-const runFfmpeg = (args: string[], onData?: (chunk: Buffer) => void): Promise<void> =>
+export type OnProgress = (percent: number) => void;
+
+const parseClock = (clock: string): number => {
+  const [hours, minutes, seconds] = clock.split(':').map(Number);
+  return hours * 3600 + minutes * 60 + seconds;
+};
+
+/**
+ * Runs ffmpeg to completion; stdout goes to `onData`, a non-zero exit becomes an error carrying stderr's tail.
+ *
+ * Progress rides on stderr: the input banner carries `Duration:` and `-progress pipe:2` adds `out_time_us=` lines
+ * every half second, which together make a percentage. `-nostats` keeps the human-readable ticker out of it.
+ */
+const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buffer) => void): Promise<void> =>
   new Promise((resolve, reject) => {
-    const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', ...args]);
+    const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'info', '-nostats', '-progress', 'pipe:2', ...args]);
     let errorOutput = '';
+    let pendingLine = '';
+    let duration = 0;
 
     ffmpeg.stdout.on('data', (chunk: Buffer) => onData?.(chunk));
     ffmpeg.stderr.on('data', (chunk: Buffer) => {
-      errorOutput = (errorOutput + chunk.toString()).slice(-2000); // keep the tail, ffmpeg can be chatty
+      const lines = (pendingLine + chunk.toString()).split('\n');
+      pendingLine = lines.pop() ?? '';
+      for (const line of lines) {
+        const clock = /^\s*Duration: (\d+:\d\d:\d\d\.\d+)/.exec(line);
+        const time = /^out_time_us=(\d+)/.exec(line);
+        if (clock) duration = parseClock(clock[1]);
+        else if (time) onProgress?.(duration > 0 ? Math.min(100, Number(time[1]) / 1e6 / duration * 100) : 0);
+        else if (!/^\w+=/.test(line)) errorOutput = `${errorOutput}${line}\n`.slice(-2000); // keep the tail
+      }
     });
 
     ffmpeg.on('error', reject); // binary missing or not executable
@@ -38,12 +60,14 @@ const runFfmpeg = (args: string[], onData?: (chunk: Buffer) => void): Promise<vo
  * ffmpeg writes raw `f32le` to stdout — the exact byte layout of a Float32Array, i.e. WAV without the
  * 44-byte header we would have to strip again anyway.
  */
-export const extractAudio = async (filePath: string): Promise<Float32Array> => {
+export const extractAudio = async (filePath: string, onProgress?: OnProgress): Promise<Float32Array> => {
   // ponytail: the whole track is buffered in RAM (~230 MB per hour); stream it to disk if long files start to hurt
   const chunks: Buffer[] = [];
   // -vn: video streams would only slow the decode down
-  await runFfmpeg(['-i', filePath, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 'f32le', 'pipe:1'], (chunk) =>
-    chunks.push(chunk),
+  await runFfmpeg(
+    ['-i', filePath, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 'f32le', 'pipe:1'],
+    onProgress,
+    (chunk) => chunks.push(chunk),
   );
 
   const pcm = Buffer.concat(chunks);
@@ -67,12 +91,11 @@ export const discardExport = (): void => {
 export const isExport = (filePath: string): boolean => filePath === lastExport;
 
 /** Re-encodes the audio track to OGG/Opus in the temp folder — the container Telegram plays as a voice message. */
-export const exportAudio = async (filePath: string): Promise<ExportedAudio> => {
+export const exportAudio = async (filePath: string, onProgress?: OnProgress): Promise<ExportedAudio> => {
   discardExport();
   const target = path.join(app.getPath('temp'), `magscribe-${process.pid}-${Date.now()}.ogg`);
-  // ponytail: no progress — ffmpeg would need the duration from a probe; the UI shows an indeterminate bar
   // ponytail: 64 kbps is plenty for speech and passable for music; raise it if the export is meant for listening
-  await runFfmpeg(['-y', '-i', filePath, '-vn', '-c:a', 'libopus', '-b:a', '64k', target]);
+  await runFfmpeg(['-y', '-i', filePath, '-vn', '-c:a', 'libopus', '-b:a', '64k', target], onProgress);
   lastExport = target;
 
   const { size } = await fs.promises.stat(target);

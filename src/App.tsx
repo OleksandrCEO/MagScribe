@@ -60,6 +60,7 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [converting, setConverting] = useState(false); // decoding the file for the model
+  const [conversion, setConversion] = useState(0); // percentage of the ffmpeg run behind converting/exporting
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
@@ -105,6 +106,7 @@ export default function App() {
       }
     });
 
+    window.api.onAudioProgress(setConversion);
     window.api.onGpuGone((message) => {
       setModelError(`${message}. Перезапусти застосунок.`);
       setProgress(null);
@@ -175,6 +177,7 @@ export default function App() {
 
     clearResults();
     setPending(false);
+    setConversion(0);
     setConverting(true);
     startedAt.current = Date.now();
     try {
@@ -193,6 +196,7 @@ export default function App() {
     if (!file) return;
 
     clearResults();
+    setConversion(0);
     setExporting(true);
     try {
       setAudio(await window.api.exportAudio(file.path));
@@ -244,9 +248,9 @@ export default function App() {
   const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
 
   const job: Job | null = exporting
-    ? { label: 'Конвертація в аудіо' }
+    ? { label: 'Конвертація в аудіо', value: conversion }
     : converting
-      ? { label: 'Конвертація аудіо' }
+      ? { label: 'Конвертація аудіо', value: conversion }
       : progress !== null
         ? { label: 'Транскрибація', value: progress }
         : summarizing

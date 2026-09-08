@@ -169,12 +169,13 @@ const requirePath = (value: unknown, channel: string): string => {
   return value;
 };
 
-ipcMain.handle('audio:extract', (_event, filePath: unknown): Promise<Float32Array> =>
-  extractAudio(requirePath(filePath, 'audio:extract')),
+// Both conversions stream their percentage back to the window that asked for them.
+ipcMain.handle('audio:extract', (event, filePath: unknown): Promise<Float32Array> =>
+  extractAudio(requirePath(filePath, 'audio:extract'), (percent) => event.sender.send('audio:progress', percent)),
 );
 
-ipcMain.handle('audio:export', (_event, filePath: unknown): Promise<ExportedAudio> =>
-  exportAudio(requirePath(filePath, 'audio:export')),
+ipcMain.handle('audio:export', (event, filePath: unknown): Promise<ExportedAudio> =>
+  exportAudio(requirePath(filePath, 'audio:export'), (percent) => event.sender.send('audio:progress', percent)),
 );
 
 /** Save dialog; null when the user cancels. */
