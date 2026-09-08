@@ -25,6 +25,7 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
+  const [converting, setConverting] = useState(false);
   const [transcript, setTranscript] = useState('');
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
@@ -46,6 +47,7 @@ export default function App() {
       }
       if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
       if (message.type === 'progress') setProgress(message.progress);
+      if (message.type === 'partial') setTranscript(message.text);
       if (message.type === 'result') {
         setTranscript(message.text);
         setProgress(null);
@@ -85,13 +87,16 @@ export default function App() {
     if (!file || !workerRef.current) return;
 
     setTranscript('');
-    setProgress(0);
+    setConverting(true);
     try {
       const audio = await window.api.extractAudio(file.path);
+      setProgress(0);
       workerRef.current.postMessage({ type: 'transcribe', audio } satisfies WorkerRequest, [audio.buffer]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
       setProgress(null);
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -162,6 +167,8 @@ export default function App() {
 
       {fallback && <p className="text-center text-xs text-muted-foreground">{fallback}</p>}
 
+      {converting && <p className="text-center text-sm text-muted-foreground">Конвертація аудіо…</p>}
+
       {progress !== null && (
         <div className="flex flex-col gap-2">
           <div className="flex justify-between text-sm text-muted-foreground">
@@ -172,13 +179,12 @@ export default function App() {
         </div>
       )}
 
-      <Button disabled={!file || !modelReady || progress !== null} onClick={startTranscription}>
-        {progress !== null ? 'Транскрибую…' : modelStage === 'ready' ? 'Транскрибувати' : 'Чекаю на модель…'}
+      <Button disabled={!file || !modelReady || converting || progress !== null} onClick={startTranscription}>
+        {converting || progress !== null ? 'Транскрибую…' : modelStage === 'ready' ? 'Транскрибувати' : 'Чекаю на модель…'}
       </Button>
 
       {transcript && <Textarea readOnly value={transcript} className="min-h-48" />}
 
-      {device && <p className="text-center text-xs text-muted-foreground">Модель готова, рушій: {device}</p>}
 
       <Toaster />
     </div>

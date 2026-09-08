@@ -21,6 +21,7 @@ export type WorkerResponse =
   | { type: 'fallback'; from: Device; reason: string }
   | { type: 'ready'; device: Device }
   | { type: 'progress'; progress: number } // transcription, 0..100
+  | { type: 'partial'; text: string } // text so far, so the first chunk is not a silent wait
   | { type: 'result'; text: string }
   | { type: 'error'; message: string };
 
@@ -78,7 +79,14 @@ const transcribe = async (audio: Float32Array): Promise<void> => {
   // The pipeline types its tokenizer as the generic base class; for whisper it really is a WhisperTokenizer.
   const tokenizer = transcriber.tokenizer as ConstructorParameters<typeof WhisperTextStreamer>[0];
 
+  let text = '';
+
   const streamer = new WhisperTextStreamer(tokenizer, {
+    // Chunks take a while, so stream the words out as they are decoded instead of waiting for the chunk.
+    callback_function: (piece: string) => {
+      text += piece;
+      post({ type: 'partial', text });
+    },
     // end() runs once per generate() call, and the pipeline calls generate() once per audio chunk
     on_finalize: () => {
       finished += 1;
