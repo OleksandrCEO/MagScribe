@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen } from 'electron';
+import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerSaveBlocker, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -60,8 +60,26 @@ const saveBounds = (window: BrowserWindow): void => {
   }
 };
 
+let mainWindow: BrowserWindow | null = null;
+let working = false;
+let sleepBlocker: number | null = null;
+
+/** The renderer tells us when a transcription is in flight; the main process guards the machine around it. */
+const setWorking = (value: boolean): void => {
+  working = value;
+
+  // A long transcription is unattended work — do not let the machine doze off in the middle of it.
+  if (working && sleepBlocker === null) {
+    sleepBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  }
+  if (!working && sleepBlocker !== null) {
+    powerSaveBlocker.stop(sleepBlocker);
+    sleepBlocker = null;
+  }
+};
+
 const createWindow = () => {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     ...readBounds(), // no saved x/y -> Electron centers the window itself
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
@@ -75,21 +93,41 @@ const createWindow = () => {
     },
   });
 
+  const window = mainWindow;
+
   const show = (): void => {
-    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+    if (!window.isDestroyed() && !window.isVisible()) window.show();
   };
 
-  mainWindow.once('ready-to-show', show);
+  window.once('ready-to-show', show);
   // Safety net: with GPU compositing off (see the Vulkan switches above) a hidden window never paints its
   // first frame, so ready-to-show never fires and the app would sit there invisible.
-  mainWindow.webContents.once('did-finish-load', show);
-  mainWindow.on('close', () => saveBounds(mainWindow));
+  window.webContents.once('did-finish-load', show);
+  window.on('close', (event) => {
+    saveBounds(window);
+    if (!working) return;
+
+    event.preventDefault();
+    const answer = dialog.showMessageBoxSync(window, {
+      type: 'question',
+      buttons: ['Продовжити', 'Перервати'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Транскрипція ще триває',
+      detail: 'Якщо закрити вікно зараз, розпізнаний текст буде втрачено.',
+    });
+
+    if (answer === 1) {
+      setWorking(false);
+      window.destroy();
+    }
+  });
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(
+    window.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
     );
   }
@@ -128,6 +166,16 @@ ipcMain.handle('file:save', async (_event, text: unknown, suggestedName: unknown
 
   await fs.promises.writeFile(filePath, text, 'utf-8');
   return true;
+});
+
+ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
+
+ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
+  if (!Notification.isSupported()) return;
+
+  const notification = new Notification({ title: String(title), body: String(body) });
+  notification.on('click', () => mainWindow?.show());
+  notification.show();
 });
 
 ipcMain.handle('summary:run', (_event, transcript: unknown): Promise<string> => {

@@ -20,7 +20,7 @@
           # WebGPU) fails to initialise inside the shell.
           NIX_LD_LIBRARY_PATH = "/run/opengl-driver/lib:" + pkgs.lib.makeLibraryPath (with pkgs; [
             alsa-lib at-spi2-atk at-spi2-core atk cairo cups dbus expat glib gtk3
-            libdrm libgbm libGL libxkbcommon mesa nspr nss pango stdenv.cc.cc.lib systemd
+            libdrm libgbm libGL libnotify libxkbcommon mesa nspr nss pango stdenv.cc.cc.lib systemd
             libx11 libxcomposite libxdamage libxext libxfixes
             libxrandr libxscrnsaver libxtst libxcb
           ]);

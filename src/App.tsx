@@ -54,6 +54,7 @@ export default function App() {
       if (message.type === 'result') {
         setTranscript(message.text);
         setProgress(null);
+        window.api.notify('MagScribe', `Транскрипція завершена — ${countWords(message.text)} слів`);
       }
       if (message.type === 'error') {
         // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
@@ -139,10 +140,16 @@ export default function App() {
     }
   };
 
+  const busy = converting || progress !== null;
+
+  // Main keeps the machine awake while this is true, and asks before closing the window.
+  useEffect(() => {
+    window.api.setWorking(busy);
+  }, [busy]);
+
   const modelReady = device !== null;
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
   const modelStage = modelError ? 'failed' : modelReady ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
-  const busy = converting || progress !== null;
 
   return (
     // Dropping outside the zone would otherwise make the window navigate to the file.

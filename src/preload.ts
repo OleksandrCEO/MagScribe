@@ -14,6 +14,9 @@ const api = {
   saveText: (text: string, suggestedName: string): Promise<boolean> =>
     ipcRenderer.invoke('file:save', text, suggestedName),
   copyText: (text: string): Promise<void> => clipboard.writeText(text),
+  // Lets main keep the machine awake and ask before the window closes mid-run.
+  setWorking: (working: boolean): void => ipcRenderer.send('work:working', working),
+  notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
 };
 
 contextBridge.exposeInMainWorld('api', api);

@@ -37,6 +37,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - `src/worker.ts` — the transcription Web Worker. Model dtype is picked from the adapter's features; measured on this GPU, an int8 encoder is ~9x slower than 4-bit for the same text, so do not "upgrade" it.
 - `src/audio.ts` — `extractAudio(filePath)` decodes any media file to 16 kHz mono `Float32Array` via the ffmpeg-static binary. Reuse it instead of spawning ffmpeg again.
 - WebGPU on Linux needs all three switches set in `main.ts`: `enable-unsafe-webgpu`, `enable-features=Vulkan` and `disable-gpu-compositing`. Without the first two `requestAdapter()` returns null or SwiftShader; without the third, Vulkan takes over window compositing and paints an empty window. Verified on NVIDIA + KDE Wayland; `ozone-platform=x11`, `use-angle=gl` and `use-gl=egl` all lose the adapter.
+- `Notification.isSupported()` is false without `libnotify` on the library path — Electron dlopens it at runtime. The dev shell provides it; a packaged build needs it from the host system.
 - Dropped files have no `File.path` in modern Electron. The real path comes from `window.api.getPathForFile(file)`, which wraps `webUtils.getPathForFile` in the preload.
 - Toasts: `import { toast } from 'sonner'`. `<Toaster />` is mounted once in `App.tsx` — don't mount a second one.
 
