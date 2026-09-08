@@ -7,7 +7,8 @@ const api = {
   selectFile: (): Promise<SelectedFile | null> => ipcRenderer.invoke('file:select'),
   // Modern Electron strips File.path; this is the only way to learn where a dropped file lives.
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
-  transcribe: (filePath: string): Promise<string> => ipcRenderer.invoke('transcribe:run', filePath),
+  // Transcription itself runs in a renderer worker; main only turns media into samples it can chew on.
+  extractAudio: (filePath: string): Promise<Float32Array> => ipcRenderer.invoke('audio:extract', filePath),
   summarize: (transcript: string): Promise<string> => ipcRenderer.invoke('summary:run', transcript),
 };
 

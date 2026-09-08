@@ -1,9 +1,13 @@
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { FileVideoIcon, UploadIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Textarea } from '@/components/ui/textarea';
 import { Toaster } from '@/components/ui/sonner';
 import type { SelectedFile } from '@/preload';
+import type { Device, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
 const formatSize = (bytes: number): string => {
@@ -16,8 +20,45 @@ const formatSize = (bytes: number): string => {
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [download, setDownload] = useState(0);
+  const [device, setDevice] = useState<Device | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
+  const [transcript, setTranscript] = useState('');
+
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
+  const workerRef = useRef<Worker | null>(null);
+  const ready = useRef(false); // read inside the worker listener, which never sees state updates
+
+  useEffect(() => {
+    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+
+    worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+      const message = event.data;
+      if (message.type === 'download') setDownload(message.progress);
+      if (message.type === 'ready') {
+        setDownload(100);
+        setDevice(message.device);
+        ready.current = true;
+      }
+      if (message.type === 'progress') setProgress(message.progress);
+      if (message.type === 'result') {
+        setTranscript(message.text);
+        setProgress(null);
+      }
+      if (message.type === 'error') {
+        // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
+        if (!ready.current) setModelError(message.message);
+        else toast.error(message.message);
+        setProgress(null);
+      }
+    });
+
+    worker.postMessage({ type: 'load' } satisfies WorkerRequest);
+    return () => worker.terminate();
+  }, []);
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -38,10 +79,28 @@ export default function App() {
     if (chosen) setFile(chosen);
   };
 
+  const startTranscription = async (): Promise<void> => {
+    if (!file || !workerRef.current) return;
+
+    setTranscript('');
+    setProgress(0);
+    try {
+      const audio = await window.api.extractAudio(file.path);
+      workerRef.current.postMessage({ type: 'transcribe', audio } satisfies WorkerRequest, [audio.buffer]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      setProgress(null);
+    }
+  };
+
+  const modelReady = device !== null;
+  // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
+  const modelStage = modelError ? 'failed' : modelReady ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
+
   return (
     // Dropping outside the zone would otherwise make the window navigate to the file.
     <div
-      className="flex min-h-screen flex-col items-center justify-center gap-6 p-8"
+      className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center gap-6 p-8"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => event.preventDefault()}
     >
@@ -57,7 +116,7 @@ export default function App() {
         }}
         onDrop={handleDrop}
         className={cn(
-          'w-full max-w-xl items-center gap-4 border-2 border-dashed p-10 text-center transition-colors',
+          'items-center gap-4 border-2 border-dashed p-10 text-center transition-colors',
           dragging ? 'border-primary bg-primary/5' : 'border-border',
         )}
       >
@@ -72,7 +131,7 @@ export default function App() {
       </Card>
 
       {file && (
-        <div className="flex max-w-xl items-center gap-3 text-sm">
+        <div className="flex items-center gap-3 text-sm">
           <FileVideoIcon className="size-5 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium" title={file.path}>
             {file.name}
@@ -80,6 +139,42 @@ export default function App() {
           <span className="shrink-0 text-muted-foreground">{formatSize(file.size)}</span>
         </div>
       )}
+
+      {modelStage === 'downloading' && (
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between text-sm text-muted-foreground">
+            <span>Завантаження моделі</span>
+            <span>{Math.round(download)}%</span>
+          </div>
+          <Progress value={download} />
+        </div>
+      )}
+
+      {modelStage === 'preparing' && (
+        <p className="text-center text-sm text-muted-foreground">
+          Модель завантажена, готую до роботи — перший запуск триває кілька хвилин
+        </p>
+      )}
+
+      {modelStage === 'failed' && <p className="text-center text-sm text-destructive">{modelError}</p>}
+
+      {progress !== null && (
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between text-sm text-muted-foreground">
+            <span>Транскрипція</span>
+            <span>{Math.round(progress)}%</span>
+          </div>
+          <Progress value={progress} />
+        </div>
+      )}
+
+      <Button disabled={!file || !modelReady || progress !== null} onClick={startTranscription}>
+        {progress !== null ? 'Транскрибую…' : modelStage === 'ready' ? 'Транскрибувати' : 'Чекаю на модель…'}
+      </Button>
+
+      {transcript && <Textarea readOnly value={transcript} className="min-h-48" />}
+
+      {device && <p className="text-center text-xs text-muted-foreground">Модель готова, рушій: {device}</p>}
 
       <Toaster />
     </div>

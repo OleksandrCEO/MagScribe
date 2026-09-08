@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import type { SelectedFile } from './preload';
+import { extractAudio } from './audio';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -90,6 +91,11 @@ ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
   const [filePath] = filePaths;
   const { size } = await fs.promises.stat(filePath);
   return { path: filePath, name: path.basename(filePath), size };
+});
+
+ipcMain.handle('audio:extract', (_event, filePath: unknown): Promise<Float32Array> => {
+  if (typeof filePath !== 'string' || filePath.length === 0) throw new Error('audio:extract needs a file path');
+  return extractAudio(filePath);
 });
 
 // This method will be called when Electron has finished

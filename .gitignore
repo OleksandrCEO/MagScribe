@@ -116,3 +116,6 @@ Desktop.ini
 
 # direnv
 .direnv/
+
+# Local test media
+assets/test.mp4
