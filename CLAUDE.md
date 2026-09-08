@@ -45,7 +45,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
   still succeeds, `shader-f16` is missing, and the GPU process burns 600 % CPU. The manifest is provided by the host
   config (`/home/config/modules/desktop/nvidia.nix`); the flake still needs `vulkan-loader` for `libvulkan.so.1`.
   The only trustworthy check is `nvidia-smi` by PID: our GPU process must be `C+G` with hundreds of MiB, not `G` with
-  3 MiB. Evidence and the wrong turns are in `docs/gpu-handoff.md`. `ozone-platform=x11` does not help and wrecks
+  3 MiB. The full evidence and wrong turns live in git history (`docs/gpu-handoff.md` up to commit `1b9df89`). `ozone-platform=x11` does not help and wrecks
   HiDPI; do not retry it.
 - A run that sits at 0 % for many minutes with the GPU process (not the renderer) at ~500 % CPU was SwiftShader JIT-compiling shaders on the CPU; on a real GPU the first run still compiles, but not for that long. Chromium's per-cache 6 MB cap on `DawnWebGPUCache` is real and `gpu-disk-cache-size-kb` in `main.ts` raises it, but the cache only helps once the adapter is a real GPU. Diagnose with `ps -T -p <gpu pid>`: threads named `Thread<NN>` are SwiftShader's workers.
 - During a transcription do not touch `src/`: Forge restarts Electron on every main/preload change and Vite reloads the renderer on every renderer change, either of which kills the run and, on a first run, leaves the shader cache unwritten. `.direnv` is excluded from Vite's watcher in `vite.renderer.config.mts` for the same reason.
