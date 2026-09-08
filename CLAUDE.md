@@ -20,6 +20,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - `npm run lint` — eslint (run after every code change)
 - `npx shadcn@latest add <component>` — add a shadcn component
 - `npm start` — dev run (Vite + Electron window); the developer runs this, ask before launching it yourself
+- On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `flake.nix`
 
 ## Gotchas
 
