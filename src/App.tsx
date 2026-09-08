@@ -481,7 +481,7 @@ export default function App() {
                 <DownloadIcon /> Зберегти .txt
               </Button>
               <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
-                <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вижимка'}
+                <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вловити суть'}
               </Button>
             </>
           )}
