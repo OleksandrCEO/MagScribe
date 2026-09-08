@@ -5,6 +5,13 @@ import started from 'electron-squirrel-startup';
 import type { SelectedFile } from './preload';
 import { extractAudio } from './audio';
 
+// Linux ships WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
+// returns null and transcription falls back to the (much slower) wasm engine.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-unsafe-webgpu');
+  app.commandLine.appendSwitch('enable-features', 'Vulkan');
+}
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();

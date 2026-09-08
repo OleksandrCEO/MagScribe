@@ -16,7 +16,9 @@
           # The Electron binary npm downloads is a plain FHS build and looks for libatk, libgtk и co.
           # in /usr/lib, which NixOS does not have. nix-ld resolves them from this list instead.
           NIX_LD = pkgs.lib.fileContents "${pkgs.stdenv.cc}/nix-support/dynamic-linker";
-          NIX_LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+          # /run/opengl-driver/lib first: the system GPU driver has to win over mesa, or Vulkan (and with it
+          # WebGPU) fails to initialise inside the shell.
+          NIX_LD_LIBRARY_PATH = "/run/opengl-driver/lib:" + pkgs.lib.makeLibraryPath (with pkgs; [
             alsa-lib at-spi2-atk at-spi2-core atk cairo cups dbus expat glib gtk3
             libdrm libgbm libGL libxkbcommon mesa nspr nss pango stdenv.cc.cc.lib systemd
             xorg.libX11 xorg.libXcomposite xorg.libXdamage xorg.libXext xorg.libXfixes

@@ -17,6 +17,7 @@ export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Floa
 
 export type WorkerResponse =
   | { type: 'download'; progress: number } // model download, 0..100
+  | { type: 'fallback'; from: Device; reason: string }
   | { type: 'ready'; device: Device }
   | { type: 'progress'; progress: number } // transcription, 0..100
   | { type: 'result'; text: string }
@@ -51,7 +52,9 @@ const load = async (): Promise<void> => {
       post({ type: 'ready', device });
       return;
     } catch (error) {
-      if (device === devices.at(-1)) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      if (device === devices.at(-1)) throw new Error(`${device}: ${reason}`);
+      post({ type: 'fallback', from: device, reason });
     }
   }
 };

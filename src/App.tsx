@@ -23,6 +23,7 @@ export default function App() {
   const [download, setDownload] = useState(0);
   const [device, setDevice] = useState<Device | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [fallback, setFallback] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
 
@@ -43,6 +44,7 @@ export default function App() {
         setDevice(message.device);
         ready.current = true;
       }
+      if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
       if (message.type === 'progress') setProgress(message.progress);
       if (message.type === 'result') {
         setTranscript(message.text);
@@ -157,6 +159,8 @@ export default function App() {
       )}
 
       {modelStage === 'failed' && <p className="text-center text-sm text-destructive">{modelError}</p>}
+
+      {fallback && <p className="text-center text-xs text-muted-foreground">{fallback}</p>}
 
       {progress !== null && (
         <div className="flex flex-col gap-2">
