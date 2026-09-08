@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import type { Device, WorkerRequest, WorkerResponse } from '@/worker';
+import type { WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
 const formatSize = (bytes: number): string => {
@@ -30,8 +30,6 @@ const formatDuration = (seconds: number): string =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
-
-const deviceLabel: Record<Device, string> = { webgpu: 'WebGPU', wasm: 'WASM' };
 
 const THEME_KEY = 'theme';
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
@@ -57,7 +55,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [download, setDownload] = useState(0);
-  const [model, setModel] = useState<{ device: Device; encoder: string } | null>(null);
+  const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [converting, setConverting] = useState(false); // decoding the file for the model
@@ -85,7 +83,7 @@ export default function App() {
       if (message.type === 'download') setDownload(message.progress);
       if (message.type === 'ready') {
         setDownload(100);
-        setModel({ device: message.device, encoder: message.encoder });
+        setModel({ adapter: message.adapter, encoder: message.encoder });
         ready.current = true;
       }
       if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
@@ -258,7 +256,7 @@ export default function App() {
   const status = busy
     ? 'Машина не засне до завершення'
     : model
-      ? `${transcript || audio ? 'Готово' : 'Модель готова'} · ${deviceLabel[model.device]} · ${model.encoder}`
+      ? `${transcript || audio ? 'Готово' : 'Модель готова'} · ${model.adapter} · ${model.encoder}`
       : modelStage === 'preparing'
         ? 'Готую модель'
         : 'Завантажую модель';

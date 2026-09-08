@@ -18,9 +18,15 @@
           NIX_LD = pkgs.lib.fileContents "${pkgs.stdenv.cc}/nix-support/dynamic-linker";
           # /run/opengl-driver/lib first: the system GPU driver has to win over mesa, or Vulkan (and with it
           # WebGPU) fails to initialise inside the shell.
+          # vulkan-loader is what provides libvulkan.so.1, and NixOS keeps it out of /run/opengl-driver/lib
+          # (only the per-vendor ICDs live there). Without it Electron finds no loader and silently falls back
+          # to its bundled libvk_swiftshader.so: requestAdapter() still succeeds, so the app reports "WebGPU"
+          # while every matmul runs on the CPU inside the GPU process. Symptom: transcription is minutes per
+          # chunk, the GPU process eats every core and gigabytes of RAM, and nvidia-smi shows it holding 3 MiB
+          # with a graphics-only context. The loader has to be here for the nvidia_icd.json to ever be read.
           NIX_LD_LIBRARY_PATH = "/run/opengl-driver/lib:" + pkgs.lib.makeLibraryPath (with pkgs; [
             alsa-lib at-spi2-atk at-spi2-core atk cairo cups dbus expat glib gtk3
-            libdrm libgbm libGL libnotify libxkbcommon mesa nspr nss pango stdenv.cc.cc.lib systemd
+            libdrm libgbm libGL libnotify libxkbcommon mesa nspr nss pango stdenv.cc.cc.lib systemd vulkan-loader
             libx11 libxcomposite libxdamage libxext libxfixes
             libxrandr libxscrnsaver libxtst libxcb
           ]);
