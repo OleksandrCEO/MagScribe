@@ -26,6 +26,11 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('disable-gpu-compositing');
 }
 
+// Chromium caps every GPU disk cache at 6 MB. Dawn stores one VkPipelineCache blob per pipeline in
+// DawnWebGPUCache and Whisper builds hundreds of them at ~20 KB each, so the cache kept evicting itself and
+// every cold start recompiled all shaders: minutes at 0 % with the GPU process on five cores. 512 MB holds the set.
+app.commandLine.appendSwitch('gpu-disk-cache-size-kb', String(512 * 1024));
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
