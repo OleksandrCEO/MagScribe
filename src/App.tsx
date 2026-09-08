@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
+  ArrowLeftIcon,
   AudioLinesIcon,
   ClipboardCopyIcon,
   DownloadIcon,
@@ -63,6 +64,7 @@ export default function App() {
   const [transcript, setTranscript] = useState('');
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
+  const [showSummary, setShowSummary] = useState(false); // the summary has its own screen over the transcript
   const [summarizing, setSummarizing] = useState(false);
   const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
@@ -131,6 +133,7 @@ export default function App() {
   const clearResults = (): void => {
     setTranscript('');
     setSummary('');
+    setShowSummary(false);
     setElapsed(null);
     setAudio(null);
   };
@@ -217,6 +220,7 @@ export default function App() {
     setSummarizing(true);
     try {
       setSummary(await window.api.summarize(transcript));
+      setShowSummary(true);
     } catch (error) {
       failWith(error);
     } finally {
@@ -256,13 +260,17 @@ export default function App() {
   const status = busy
     ? 'Машина не засне до завершення'
     : model
-      ? `${transcript || audio ? 'Готово' : 'Модель готова'} · ${model.adapter} · ${model.encoder}`
+      ? transcript || audio
+        ? 'Готово'
+        : 'Модель готова'
       : modelStage === 'preparing'
         ? 'Готую модель'
         : 'Завантажую модель';
 
-  // What the window is about right now: picking a file, reading a transcript, or holding an exported track.
+  // What the window is about right now: picking a file, reading a transcript or its summary, or holding an
+  // exported track.
   const mode = audio || exporting ? 'audio' : transcript || busy ? 'transcript' : 'pick';
+  const screen = mode === 'transcript' && showSummary && summary ? 'summary' : mode;
   const done = transcript !== '' && !busy;
 
   const dropZone: ReactNode = (
@@ -328,19 +336,24 @@ export default function App() {
       {mode === 'pick' ? (
         <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
       ) : (
-        <div className="absolute inset-0 overflow-y-auto">
-          <div className="mx-auto w-170 max-w-full px-6 pt-22 pb-30">
+        // The text scrolls inside its own panel: the top bar, the pill and the progress block stay put.
+        <div className={cn('absolute inset-0 flex flex-col px-6 pt-22', job ? 'pb-33' : 'pb-24')}>
+          <div className="mx-auto flex min-h-0 w-170 max-w-full flex-1 flex-col">
             <h1 className="mb-1.5 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
               {baseName}
             </h1>
-            <p className="mb-9 text-center text-[13px] text-muted-foreground">
-              {audio
-                ? `OGG · Opus · ${formatSize(audio.size)}`
-                : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
-              {elapsed !== null && ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
+            <p className="mb-6 text-center text-[13px] text-muted-foreground">
+              {screen === 'summary'
+                ? `Конспект · ${countWords(summary)} слів`
+                : audio
+                  ? `OGG · Opus · ${formatSize(audio.size)}`
+                  : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
+              {screen === 'transcript' &&
+                elapsed !== null &&
+                ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
             </p>
 
-            {mode === 'audio' ? (
+            {screen === 'audio' ? (
               audio && (
                 <div className="flex items-center justify-center gap-3 text-muted-foreground">
                   <FileAudioIcon className="size-5" strokeWidth={1.75} />
@@ -348,22 +361,14 @@ export default function App() {
                 </div>
               )
             ) : (
-              <div className="text-base leading-[1.8] whitespace-pre-wrap">{transcript}</div>
-            )}
-
-            {summary && (
-              <section className="mt-10 border-t pt-7">
-                <div className="mb-3.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <SparklesIcon className="size-[15px]" />
-                    <span className="text-[13px] font-medium text-foreground">Конспект</span>
-                  </div>
-                  <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => copy(summary)}>
-                    <ClipboardCopyIcon /> Копіювати
-                  </Button>
-                </div>
-                <div className="text-[15px] leading-[1.7] whitespace-pre-wrap">{summary}</div>
-              </section>
+              <div
+                className={cn(
+                  'min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-background px-7 py-6 [scrollbar-width:thin]',
+                  'text-[15px] leading-[1.7] whitespace-pre-wrap',
+                )}
+              >
+                {screen === 'summary' ? summary : transcript}
+              </div>
             )}
           </div>
         </div>
@@ -433,15 +438,17 @@ export default function App() {
           'pointer-events-none absolute inset-x-0 bottom-0 grid grid-cols-[1fr_auto_1fr] items-end gap-4 px-6 pb-6',
         )}
       >
-        <p
+        {/* Two rows, roughly the pill's height: what is happening, then which engine does it. */}
+        <div
           className={cn(
-            'pointer-events-auto pb-2.5 text-xs',
+            'pointer-events-auto flex flex-col gap-0.5 pb-1.5 text-xs',
             modelError ? 'text-destructive' : 'text-muted-foreground',
           )}
           title={fallback ?? undefined}
         >
-          {modelError ?? status}
-        </p>
+          <span>{modelError ?? status}</span>
+          {!modelError && model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>}
+        </div>
 
         <div
           className={cn(
@@ -463,7 +470,7 @@ export default function App() {
               </Button>
             </>
           )}
-          {mode === 'transcript' && (
+          {screen === 'transcript' && (
             <>
               <Button
                 variant="ghost"
@@ -483,8 +490,31 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .txt
               </Button>
-              <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
-                <SparklesIcon /> {summarizing ? 'Готую конспект…' : 'Вловити суть'}
+              {summary ? (
+                <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setShowSummary(true)}>
+                  <SparklesIcon /> Конспект
+                </Button>
+              ) : (
+                <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
+                  <SparklesIcon /> {summarizing ? 'Готую конспект…' : 'Вловити суть'}
+                </Button>
+              )}
+            </>
+          )}
+          {screen === 'summary' && (
+            <>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setShowSummary(false)}>
+                <ArrowLeftIcon /> До транскрипту
+              </Button>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(summary)}>
+                <ClipboardCopyIcon /> Копіювати
+              </Button>
+              <Button
+                size="lg"
+                className="rounded-full px-4.5"
+                onClick={() => save(window.api.saveText(summary, `${baseName} — конспект.txt`))}
+              >
+                <DownloadIcon /> Зберегти .txt
               </Button>
             </>
           )}
