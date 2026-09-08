@@ -307,7 +307,8 @@ export default function App() {
             <div
               className={cn(
                 'relative h-full overflow-hidden rounded-full bg-foreground transition-[width]',
-                'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r after:from-transparent after:via-white/35 after:to-transparent',
+                'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r',
+                'after:from-transparent after:via-white/35 after:to-transparent',
               )}
               style={{ width: `${job.value ?? 100}%` }}
             />
@@ -317,8 +318,8 @@ export default function App() {
 
       <div
         className={cn(
-          'absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-card p-1.5 ring-1 ring-border',
-          'shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
+          'absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-card p-1.5',
+          'ring-1 ring-border shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
         )}
       >
         <Button
