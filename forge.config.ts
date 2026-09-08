@@ -6,10 +6,14 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import ffmpegStatic from 'ffmpeg-static';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // ffmpeg has to stay a real file on disk: it cannot run from inside the asar, and the Vite plugin
+    // drops node_modules from the package entirely. This copies it to <app>/resources/ffmpeg.
+    extraResource: ffmpegStatic ? [ffmpegStatic] : [],
     icon: './assets/icon', // packager appends .ico/.icns per platform
   },
   rebuildConfig: {},
