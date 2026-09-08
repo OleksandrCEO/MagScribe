@@ -95,7 +95,7 @@ export default function App() {
         setTranscript(message.text);
         setProgress(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-        window.api.notify('MagScribe', `Транскрипція завершена — ${countWords(message.text)} слів`);
+        window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(message.text)} слів`);
       }
       if (message.type === 'error') {
         // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
@@ -241,7 +241,7 @@ export default function App() {
     : converting
       ? { label: 'Конвертація аудіо' }
       : progress !== null
-        ? { label: 'Транскрипція', value: progress }
+        ? { label: 'Транскрибація', value: progress }
         : summarizing
           ? { label: 'Готую конспект' }
           : modelStage === 'downloading'
@@ -341,7 +341,7 @@ export default function App() {
               audio && (
                 <div className="flex items-center justify-center gap-3 text-muted-foreground">
                   <FileAudioIcon className="size-5" strokeWidth={1.75} />
-                  <span>Аудіодоріжку витягнуто. Збережи її або запусти транскрипцію.</span>
+                  <span>Аудіодоріжку витягнуто. Збережи її або запусти транскрибацію.</span>
                 </div>
               )
             ) : (
