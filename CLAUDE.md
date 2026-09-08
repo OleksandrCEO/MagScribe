@@ -32,6 +32,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - shadcn base color is `neutral`; the current CLI palette is neutral/zinc/stone/mauve/olive/mist/taupe (`slate` and `gray` no longer exist).
 - Long-running jobs (ffmpeg, transcription) must run in the main process and report progress to the renderer over IPC. Blocking the renderer freezes the window.
 - `npm start` passes `--force-device-scale-factor=1` on purpose: on KDE Wayland the display scale is counted twice (`devicePixelRatio` 4 on a scale-2 monitor) and the window renders ~4x too large. Keep the flag; a packaged build needs the same flag from its launcher.
+- Dropped files have no `File.path` in modern Electron. The real path comes from `window.api.getPathForFile(file)`, which wraps `webUtils.getPathForFile` in the preload.
 - Toasts: `import { toast } from 'sonner'`. `<Toaster />` is mounted once in `App.tsx` — don't mount a second one.
 
 ## Git

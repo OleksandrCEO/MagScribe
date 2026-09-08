@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, dialog, ipcMain, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
+import type { SelectedFile } from './preload';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -75,15 +76,20 @@ const createWindow = () => {
 };
 
 // The renderer never touches the filesystem: it gets a path only from this native dialog.
-ipcMain.handle('file:select', async (): Promise<string | null> => {
+ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
-      { name: 'Media', extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'mp3', 'wav', 'm4a', 'flac', 'ogg'] },
-      { name: 'All files', extensions: ['*'] },
+      { name: 'Відео', extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'mpg', 'mpeg', 'wmv'] },
+      { name: 'Аудіо', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'opus', 'aac', 'wma'] },
+      { name: 'Усі файли', extensions: ['*'] },
     ],
   });
-  return canceled || filePaths.length === 0 ? null : filePaths[0];
+  if (canceled || filePaths.length === 0) return null;
+
+  const [filePath] = filePaths;
+  const { size } = await fs.promises.stat(filePath);
+  return { path: filePath, name: path.basename(filePath), size };
 });
 
 // This method will be called when Electron has finished
