@@ -243,7 +243,7 @@ export default function App() {
       : progress !== null
         ? { label: 'Транскрипція', value: progress }
         : summarizing
-          ? { label: 'Готую вижимку' }
+          ? { label: 'Готую конспект' }
           : modelStage === 'downloading'
             ? { label: 'Завантаження моделі', value: download }
             : modelStage === 'preparing'
@@ -353,7 +353,7 @@ export default function App() {
                 <div className="mb-3.5 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <SparklesIcon className="size-[15px]" />
-                    <span className="text-[13px] font-medium text-foreground">Вижимка</span>
+                    <span className="text-[13px] font-medium text-foreground">Конспект</span>
                   </div>
                   <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => copy(summary)}>
                     <ClipboardCopyIcon /> Копіювати
@@ -481,7 +481,7 @@ export default function App() {
                 <DownloadIcon /> Зберегти .txt
               </Button>
               <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
-                <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вловити суть'}
+                <SparklesIcon /> {summarizing ? 'Готую конспект…' : 'Вловити суть'}
               </Button>
             </>
           )}
