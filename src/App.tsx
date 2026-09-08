@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { AudioLinesIcon, ClipboardCopyIcon, DownloadIcon, FileVideoIcon, SparklesIcon, UploadIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Toaster } from '@/components/ui/sonner';
 import type { SelectedFile } from '@/preload';
 import type { Device, WorkerRequest, WorkerResponse } from '@/worker';
@@ -16,18 +14,27 @@ const formatSize = (bytes: number): string => {
   return `${power === 0 ? value : value.toFixed(1)} ${units[power]}`;
 };
 
+const formatDuration = (seconds: number): string =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
+
+const deviceLabel: Record<Device, string> = { webgpu: 'WebGPU', wasm: 'WASM' };
+
+// One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
+type Job = { label: string; value?: number };
 
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
   const [download, setDownload] = useState(0);
-  const [device, setDevice] = useState<Device | null>(null);
+  const [model, setModel] = useState<{ device: Device; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
+  const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
   const [summarizing, setSummarizing] = useState(false);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
@@ -36,6 +43,7 @@ export default function App() {
   const dragDepth = useRef(0);
   const workerRef = useRef<Worker | null>(null);
   const ready = useRef(false); // read inside the worker listener, which never sees state updates
+  const startedAt = useRef(0);
 
   useEffect(() => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -46,7 +54,7 @@ export default function App() {
       if (message.type === 'download') setDownload(message.progress);
       if (message.type === 'ready') {
         setDownload(100);
-        setDevice(message.device);
+        setModel({ device: message.device, encoder: message.encoder });
         ready.current = true;
       }
       if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
@@ -55,6 +63,7 @@ export default function App() {
       if (message.type === 'result') {
         setTranscript(message.text);
         setProgress(null);
+        setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
         window.api.notify('MagScribe', `Транскрипція завершена — ${countWords(message.text)} слів`);
       }
       if (message.type === 'error') {
@@ -69,6 +78,8 @@ export default function App() {
     return () => worker.terminate();
   }, []);
 
+  const busy = converting || progress !== null;
+
   const stopDragging = (): void => {
     dragDepth.current = 0;
     setDragging(false);
@@ -78,14 +89,16 @@ export default function App() {
     setFile(picked);
     setTranscript('');
     setSummary('');
+    setElapsed(null);
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     stopDragging();
 
+    // A drop mid-run would wipe the transcript the worker is still streaming into.
     const dropped = event.dataTransfer.files[0];
-    if (!dropped) return;
+    if (!dropped || busy) return;
     pickFile({ path: window.api.getPathForFile(dropped), name: dropped.name, size: dropped.size });
   };
 
@@ -103,8 +116,10 @@ export default function App() {
 
     setTranscript('');
     setSummary('');
+    setElapsed(null);
     setPending(false);
     setConverting(true);
+    startedAt.current = Date.now();
     try {
       const audio = await window.api.extractAudio(file.path);
       setProgress(0);
@@ -142,8 +157,6 @@ export default function App() {
     }
   };
 
-  const busy = converting || progress !== null;
-
   // Main keeps the machine awake while this is true, and asks before closing the window.
   useEffect(() => {
     window.api.setWorking(busy);
@@ -151,144 +164,207 @@ export default function App() {
 
   // Loading the model takes a few seconds on every start — let the click wait for it instead of the person.
   useEffect(() => {
-    if (!pending || device === null || busy) return;
+    if (!pending || model === null || busy) return;
     setPending(false);
     void startTranscription();
-  }, [pending, device, busy]);
+  }, [pending, model, busy]);
 
-  const modelReady = device !== null;
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
-  const modelStage = modelError ? 'failed' : modelReady ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
+  const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
+
+  const job: Job | null = converting
+    ? { label: 'Конвертація аудіо' }
+    : progress !== null
+      ? { label: 'Транскрипція', value: progress }
+      : summarizing
+        ? { label: 'Готую вижимку' }
+        : modelStage === 'downloading'
+          ? { label: 'Завантаження моделі', value: download }
+          : modelStage === 'preparing'
+            ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
+            : null;
+
+  const status = busy
+    ? 'Машина не засне до завершення'
+    : model
+      ? `${transcript ? 'Готово' : 'Модель готова'} · ${deviceLabel[model.device]} · ${model.encoder}`
+      : modelStage === 'preparing'
+        ? 'Готую модель'
+        : 'Завантажую модель';
+
+  // The window becomes a document once there is something to read, or something on its way.
+  const showDoc = busy || transcript !== '';
+  const [baseName, extension = ''] = file ? [file.name.replace(/\.[^.]+$/, ''), file.name.split('.').pop()] : [''];
+
+  const dropZone: ReactNode = (
+    <div className="flex w-120 max-w-full flex-col gap-3.5">
+      <div
+        className={cn(
+          'flex flex-col items-center gap-4 rounded-2xl border border-dashed bg-background px-6 pt-10 pb-9 text-center',
+          'transition-colors',
+          dragging && 'border-primary bg-primary/5',
+        )}
+      >
+        <div className="flex size-10 items-center justify-center rounded-[10px] bg-muted text-muted-foreground">
+          <UploadIcon className="size-5" strokeWidth={1.75} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="font-medium">Перетягни відео або аудіо</span>
+          <span className="text-[13px] text-muted-foreground">MP4, MKV, MOV, MP3, WAV та інші</span>
+        </div>
+        <Button variant="outline" onClick={chooseFile}>
+          Вибрати файл
+        </Button>
+      </div>
+
+      {file && !showDoc && (
+        <div className="flex items-center gap-3 rounded-[10px] border bg-background px-3 py-2.5" title={file.path}>
+          <FileVideoIcon className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate text-[13.5px] font-medium">{file.name}</span>
+            <span className="text-xs text-muted-foreground">{formatSize(file.size)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
-    // Dropping outside the zone would otherwise make the window navigate to the file.
+    // The whole window takes drops: the zone is what lights up, but dropping beside it must not navigate away.
     <div
-      className="grid h-screen grid-cols-1 grid-rows-[minmax(0,1fr)] gap-5 p-5 md:grid-cols-[minmax(260px,300px)_1fr]"
+      className="relative h-screen overflow-hidden"
+      onDragEnter={() => {
+        dragDepth.current += 1;
+        setDragging(true);
+      }}
       onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => event.preventDefault()}
+      onDragLeave={() => {
+        dragDepth.current -= 1;
+        if (dragDepth.current <= 0) stopDragging();
+      }}
+      onDrop={handleDrop}
     >
-      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-        <div className="flex items-center gap-2">
-          <AudioLinesIcon className="size-5" />
-          <h1 className="text-lg font-semibold">MagScribe</h1>
-        </div>
+      {showDoc ? (
+        <div className="absolute inset-0 overflow-y-auto">
+          <div className="mx-auto w-170 max-w-full px-6 pt-22 pb-30">
+            <h1 className="mb-1.5 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
+              {baseName}
+            </h1>
+            <p className="mb-9 text-center text-[13px] text-muted-foreground">
+              {file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
+              {elapsed !== null && ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
+              {!busy && (
+                <>
+                  {' · '}
+                  <button className="underline-offset-4 hover:text-foreground hover:underline" onClick={chooseFile}>
+                    Інший файл
+                  </button>
+                </>
+              )}
+            </p>
+            <div className="text-base leading-[1.8] whitespace-pre-wrap">{transcript}</div>
 
-        <Card
-          onDragEnter={() => {
-            dragDepth.current += 1;
-            setDragging(true);
-          }}
-          onDragOver={(event) => event.preventDefault()}
-          onDragLeave={() => {
-            dragDepth.current -= 1;
-            if (dragDepth.current <= 0) stopDragging();
-          }}
-          onDrop={handleDrop}
-          className={cn(
-            'items-center gap-4 border-2 border-dashed p-8 text-center transition-colors',
-            dragging ? 'border-primary bg-primary/5' : 'border-border',
-          )}
-        >
-          <UploadIcon className="size-7 text-muted-foreground" />
-          <div>
-            <p className="font-medium">Перетягни сюди відео або аудіо</p>
-            <p className="text-sm text-muted-foreground">MP4, MKV, MOV, MP3, WAV та інші</p>
-          </div>
-          <Button variant="outline" onClick={chooseFile}>
-            Вибрати файл
-          </Button>
-        </Card>
-
-        {file && (
-          <div className="flex items-center gap-3 text-sm">
-            <FileVideoIcon className="size-5 shrink-0 text-muted-foreground" />
-            <span className="truncate font-medium" title={file.path}>
-              {file.name}
-            </span>
-            <span className="shrink-0 text-muted-foreground">{formatSize(file.size)}</span>
-          </div>
-        )}
-
-        {modelStage === 'downloading' && (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Завантаження моделі</span>
-              <span>{Math.round(download)}%</span>
-            </div>
-            <Progress value={download} />
-          </div>
-        )}
-
-        {modelStage === 'preparing' && (
-          <p className="text-sm text-muted-foreground">
-            Модель завантажена, готую до роботи — перший запуск триває кілька хвилин
-          </p>
-        )}
-
-        {modelStage === 'failed' && <p className="text-sm text-destructive">{modelError}</p>}
-
-        {converting && <p className="text-sm text-muted-foreground">Конвертація аудіо…</p>}
-
-        {progress !== null && (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Транскрипція</span>
-              <span>{Math.round(progress)}%</span>
-            </div>
-            <Progress value={progress} />
-          </div>
-        )}
-
-        <Button
-          disabled={!file || busy || pending || modelStage === 'failed'}
-          onClick={() => (modelReady ? void startTranscription() : setPending(true))}
-        >
-          {busy ? 'Транскрибую…' : pending ? 'Почну, щойно модель завантажиться' : 'Транскрибувати'}
-        </Button>
-
-        {fallback && <p className="text-xs text-muted-foreground">{fallback}</p>}
-      </div>
-
-      <div className="flex min-h-0 flex-col gap-4">
-        {summary && (
-          <Card className="max-h-[40%] gap-3 p-5">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-medium">Вижимка</h2>
-              <Button variant="ghost" size="sm" onClick={() => copy(summary)}>
-                <ClipboardCopyIcon /> Копіювати
-              </Button>
-            </div>
-            <p className="min-h-0 flex-1 overflow-y-auto text-sm whitespace-pre-wrap">{summary}</p>
-          </Card>
-        )}
-
-        <Card className="min-h-0 flex-1 gap-3 p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-medium">Транскрипт</h2>
-            {transcript && (
-              <span className="text-xs text-muted-foreground">
-                {countWords(transcript)} слів · {transcript.length} символів
-              </span>
+            {summary && (
+              <section className="mt-10 border-t pt-7">
+                <div className="mb-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <SparklesIcon className="size-[15px]" />
+                    <span className="text-[13px] font-medium text-foreground">Вижимка</span>
+                  </div>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => copy(summary)}>
+                    <ClipboardCopyIcon /> Копіювати
+                  </Button>
+                </div>
+                <div className="text-[15px] leading-[1.7] whitespace-pre-wrap">{summary}</div>
+              </section>
             )}
           </div>
+        </div>
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
+      )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap">
-            {transcript || <span className="text-muted-foreground">Тут зʼявиться текст після транскрипції.</span>}
-          </div>
+      {showDoc && dragging && !busy && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 pb-15 backdrop-blur-sm">
+          {dropZone}
+        </div>
+      )}
 
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" disabled={!transcript} onClick={() => copy(transcript)}>
-              <ClipboardCopyIcon /> Копіювати
-            </Button>
-            <Button variant="outline" size="sm" disabled={!transcript} onClick={saveTranscript}>
-              <DownloadIcon /> Зберегти .txt
-            </Button>
-            <Button size="sm" disabled={!transcript || summarizing} onClick={makeSummary}>
-              <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Зробити вижимку'}
-            </Button>
-          </div>
-        </Card>
+      <div className="absolute top-5 left-6 flex items-center gap-2 text-muted-foreground">
+        <AudioLinesIcon className="size-4" />
+        <span className="text-[13px] font-medium text-foreground">MagScribe</span>
       </div>
+
+      {job && (
+        <div className="absolute bottom-23 left-1/2 flex w-110 max-w-[calc(100%-3rem)] -translate-x-1/2 flex-col gap-2">
+          <div className="flex justify-between gap-4 text-[12.5px] text-muted-foreground">
+            <span>{job.label}</span>
+            {job.value !== undefined && (
+              <b className="font-medium text-foreground tabular-nums">{Math.round(job.value)} %</b>
+            )}
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className={cn(
+                'relative h-full overflow-hidden rounded-full bg-foreground transition-[width]',
+                'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r after:from-transparent after:via-white/35 after:to-transparent',
+              )}
+              style={{ width: `${job.value ?? 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          'absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-card p-1.5 ring-1 ring-border',
+          'shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
+        )}
+      >
+        <Button
+          size="lg"
+          className="rounded-full px-4.5"
+          disabled={!file || busy || pending || modelStage === 'failed'}
+          onClick={() => (model ? void startTranscription() : setPending(true))}
+        >
+          {busy ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
+        </Button>
+        <div className="mx-1 h-5 w-px bg-border" />
+        <Button
+          variant="ghost"
+          size="lg"
+          className="rounded-full px-3.5"
+          disabled={!transcript}
+          onClick={() => copy(transcript)}
+        >
+          <ClipboardCopyIcon /> Копіювати
+        </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="rounded-full px-3.5"
+          disabled={!transcript}
+          onClick={saveTranscript}
+        >
+          <DownloadIcon /> Зберегти .txt
+        </Button>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="rounded-full px-3.5"
+          disabled={!transcript || summarizing}
+          onClick={makeSummary}
+        >
+          <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вижимка'}
+        </Button>
+      </div>
+
+      <p
+        className={cn('absolute bottom-8.5 left-6 text-xs', modelError ? 'text-destructive' : 'text-muted-foreground')}
+        title={fallback ?? undefined}
+      >
+        {modelError ?? status}
+      </p>
 
       <Toaster />
     </div>

@@ -46,6 +46,12 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    /* the highlight that runs along a progress fill */
+    --animate-sheen: sheen 1.8s ease-in-out infinite;
+    @keyframes sheen {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(100%); }
+    }
 }
 
 :root {

@@ -19,7 +19,7 @@ export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Floa
 export type WorkerResponse =
   | { type: 'download'; progress: number } // model download, 0..100
   | { type: 'fallback'; from: Device; reason: string }
-  | { type: 'ready'; device: Device }
+  | { type: 'ready'; device: Device; encoder: string } // encoder dtype, so the UI can say fp16 vs q4
   | { type: 'progress'; progress: number } // transcription, 0..100
   | { type: 'partial'; text: string } // text so far, so the first chunk is not a silent wait
   | { type: 'result'; text: string }
@@ -53,11 +53,12 @@ const load = async (): Promise<void> => {
 
   for (const device of devices) {
     try {
+      const options = await deviceOptions(device);
       transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
-        ...(await deviceOptions(device)),
+        ...options,
         progress_callback: reportDownload,
       });
-      post({ type: 'ready', device });
+      post({ type: 'ready', device, encoder: options.dtype.encoder_model });
       return;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
