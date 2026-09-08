@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+/// <reference types="@webgpu/types" />
 import {
   pipeline,
   WhisperTextStreamer,
@@ -23,12 +24,17 @@ export type WorkerResponse =
   | { type: 'result'; text: string }
   | { type: 'error'; message: string };
 
-// Quantisation follows this checkpoint's model card: fp16 encoder + q4 decoder on WebGPU,
-// int8 throughout on wasm, where fp16 has no hardware to run on.
-const DEVICE_OPTIONS = {
-  webgpu: { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q4' } },
-  wasm: { device: 'wasm', dtype: 'q8' },
-} as const;
+// Quantisation per this checkpoint's model card: fp16 encoder + q4 decoder on WebGPU. Not every adapter
+// implements shader-f16 though (NVIDIA under Vulkan does not), so the encoder drops to fp32 there — the same
+// pairing HF's own demo uses for cards without fp16. On wasm both halves go 4-bit: q8 weights of this model
+// fail to load in onnxruntime-web.
+const deviceOptions = async (device: Device) => {
+  if (device === 'wasm') return { device, dtype: { encoder_model: 'q4', decoder_model_merged: 'q4' } } as const;
+
+  const adapter = await navigator.gpu.requestAdapter();
+  const fp16 = adapter?.features.has('shader-f16') ?? false;
+  return { device, dtype: { encoder_model: fp16 ? 'fp16' : 'fp32', decoder_model_merged: 'q4' } } as const;
+};
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 
@@ -46,7 +52,7 @@ const load = async (): Promise<void> => {
   for (const device of devices) {
     try {
       transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
-        ...DEVICE_OPTIONS[device],
+        ...(await deviceOptions(device)),
         progress_callback: reportDownload,
       });
       post({ type: 'ready', device });

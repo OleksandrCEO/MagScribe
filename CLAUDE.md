@@ -34,6 +34,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - `npm start` passes `--force-device-scale-factor=1` on purpose: on KDE Wayland the display scale is counted twice (`devicePixelRatio` 4 on a scale-2 monitor) and the window renders ~4x too large. Keep the flag; a packaged build needs the same flag from its launcher.
 - The Vite plugin strips `node_modules` from the package: a built asar holds only `.vite/*` and `package.json`. Runtime binaries and assets therefore go through `packagerConfig.extraResource` (like the ffmpeg binary) and are read from `process.resourcesPath`, never `require`d from a package. `asar.unpack` would have nothing to unpack.
 - `src/audio.ts` — `extractAudio(filePath)` decodes any media file to 16 kHz mono `Float32Array` via the ffmpeg-static binary. Reuse it instead of spawning ffmpeg again.
+- WebGPU on Linux needs all three switches set in `main.ts`: `enable-unsafe-webgpu`, `enable-features=Vulkan` and `disable-gpu-compositing`. Without the first two `requestAdapter()` returns null or SwiftShader; without the third, Vulkan takes over window compositing and paints an empty window. Verified on NVIDIA + KDE Wayland; `ozone-platform=x11`, `use-angle=gl` and `use-gl=egl` all lose the adapter.
 - Dropped files have no `File.path` in modern Electron. The real path comes from `window.api.getPathForFile(file)`, which wraps `webUtils.getPathForFile` in the preload.
 - Toasts: `import { toast } from 'sonner'`. `<Toaster />` is mounted once in `App.tsx` — don't mount a second one.
 

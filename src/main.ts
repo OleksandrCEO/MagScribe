@@ -1,15 +1,18 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import type { SelectedFile } from './preload';
 import { extractAudio } from './audio';
 
-// Linux ships WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
-// returns null and transcription falls back to the (much slower) wasm engine.
+// Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
+// returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
+// Vulkan also switches window compositing, which paints an empty window on this stack — so composite on the
+// CPU instead. Our UI is text and a progress bar; the GPU is here for the model, not for the chrome.
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-unsafe-webgpu');
   app.commandLine.appendSwitch('enable-features', 'Vulkan');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
 }
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -62,6 +65,7 @@ const createWindow = () => {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     show: false, // avoid the white flash: shown on ready-to-show below
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#171717' : '#ffffff',
     icon: path.join(__dirname, '../../assets/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -70,7 +74,14 @@ const createWindow = () => {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  const show = (): void => {
+    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+  };
+
+  mainWindow.once('ready-to-show', show);
+  // Safety net: with GPU compositing off (see the Vulkan switches above) a hidden window never paints its
+  // first frame, so ready-to-show never fires and the app would sit there invisible.
+  mainWindow.webContents.once('did-finish-load', show);
   mainWindow.on('close', () => saveBounds(mainWindow));
 
   // and load the index.html of the app.
