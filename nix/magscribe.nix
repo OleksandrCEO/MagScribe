@@ -46,14 +46,19 @@ pkgs.stdenv.mkDerivation {
   buildInputs = map pkgs.lib.getLib (import ./electron-libs.nix pkgs);
 
   # Electron loads these by soname at runtime rather than linking them, so autoPatchelfHook cannot find them on
-  # its own and they have to go into the RPATH by hand. libGL is libglvnd, which owns the libEGL.so.1 dispatch
+  # its own and they have to go into the RUNPATH by hand. libGL is libglvnd, which owns the libEGL.so.1 dispatch
   # library: /run/opengl-driver/lib holds only the vendor halves (libEGL_nvidia, libEGL_mesa), so without this
   # the GPU process fails every EGL display type and exits during initialisation. libnotify decides whether
-  # Notification.isSupported(), and the Vulkan loader is what WebGPU needs.
+  # Notification.isSupported().
+  #
+  # nixpkgs' vulkan-loader deliberately does NOT belong here, even though Electron dlopens libvulkan.so.1: it is
+  # built with SYSCONFDIR=/run/opengl-driver/share, and every ICD manifest there names its driver by an absolute
+  # /nix/store path that Chromium's GPU sandbox refuses to open — the loader then reports "Found no drivers" and
+  # WebGPU drops to SwiftShader. Electron ships its own loader next to the binary with the upstream /etc default,
+  # which is exactly where the sandbox does allow a manifest, so leave that one to win the RUNPATH.
   runtimeDependencies = map pkgs.lib.getLib (with pkgs; [
     libGL
     libnotify
-    vulkan-loader
   ]);
 
   dontBuild = true;
