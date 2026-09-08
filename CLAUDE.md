@@ -20,7 +20,8 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - `npm run lint` — eslint (run after every code change)
 - `npx shadcn@latest add <component>` — add a shadcn component
 - `npm start` — dev run (Vite + Electron window); the developer runs this, ask before launching it yourself
-- On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `flake.nix`
+- `npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result` — build the installable app, then `nix profile install /tmp/magscribe-result` puts MagScribe in the application menu (`nix profile upgrade magscribe` for later builds). See `nix/magscribe.nix`
+- On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `nix/electron-libs.nix`
 
 ## Gotchas
 
@@ -51,6 +52,8 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - During a transcription do not touch `src/`: Forge restarts Electron on every main/preload change and Vite reloads the renderer on every renderer change, either of which kills the run and, on a first run, leaves the shader cache unwritten. `.direnv` is excluded from Vite's watcher in `vite.renderer.config.mts` for the same reason.
 - `Notification.isSupported()` is false without `libnotify` on the library path — Electron dlopens it at runtime. The dev shell provides it; a packaged build needs it from the host system.
 - Dropped files have no `File.path` in modern Electron. The real path comes from `window.api.getPathForFile(file)`, which wraps `webUtils.getPathForFile` in the preload.
+- Packaging is two steps on purpose: `npm run package` needs the network and a writable `node_modules`, so Nix only wraps what electron-forge already produced (`out/transcriber-linux-x64`). `nix/magscribe.nix` patchelfs those FHS binaries against the same library list the dev shell uses, adds `/run/opengl-driver/lib` and the `--force-device-scale-factor=1` flag to the launcher, and ships a desktop entry. Everything Chromium only dlopens (libglvnd for `libEGL.so.1`, libnotify, the Vulkan loader) has to be listed in `runtimeDependencies` — autoPatchelfHook cannot see those, and without libglvnd the GPU process fails every EGL display type and exits.
+- The desktop entry is named `transcriber.desktop` to match the Wayland app_id Electron derives from `productName`; renaming `productName` would break both that and `~/.config/transcriber`, where the downloaded model lives.
 - Toasts: `import { toast } from 'sonner'`. `<Toaster />` is mounted once in `App.tsx` — don't mount a second one.
 
 ## Git
