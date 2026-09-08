@@ -27,7 +27,8 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - The renderer config MUST stay `.mts`. `@tailwindcss/vite` is ESM-only and Forge loads a `.ts` config as CJS — renaming it back breaks `npm start` with an opaque esbuild error.
 - The `@/` alias is declared twice: `paths` in `tsconfig.json` and `resolve.alias` in `vite.renderer.config.mts`. Change both or imports break in either tsc or the bundle.
 - `@vitejs/plugin-react` is pinned to `^4` — v6+ requires Vite 8, Forge is on Vite 5. Do not bump it.
-- Dark theme is **system-driven only**: `@custom-variant dark (@media (prefers-color-scheme: dark))` in `src/index.css`, tokens under `@media (prefers-color-scheme: dark) { :root }`. There is no `.dark` class and no theme provider. Never add `next-themes` or a theme toggle unless asked.
+- Theme: CSS knows only `prefers-color-scheme` (`@custom-variant dark (@media (prefers-color-scheme: dark))` in `src/index.css`, tokens under `@media (prefers-color-scheme: dark) { :root }`). The light/system/dark toggle in `App.tsx` works by sending `theme:set` to main, which flips `nativeTheme.themeSource` — Chromium then reports the matching `prefers-color-scheme`. No `.dark` class, no theme provider, no `next-themes`.
+- `src/audio.ts` also has `exportAudio(filePath)` — re-encodes to OGG/Opus in the temp folder; only one export lives at a time and `audio:save` copies out nothing but that file.
 - Re-running `shadcn init` or re-adding a component overwrites `src/index.css` and `src/components/ui/*` — the system-dark block and `theme="system"` in `sonner.tsx` must be re-applied afterwards.
 - shadcn base color is `neutral`; the current CLI palette is neutral/zinc/stone/mauve/olive/mist/taupe (`slate` and `gray` no longer exist).
 - Long-running jobs (ffmpeg, transcription) must run in the main process and report progress to the renderer over IPC. Blocking the renderer freezes the window.

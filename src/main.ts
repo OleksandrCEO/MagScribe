@@ -1,9 +1,19 @@
-import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerSaveBlocker, screen } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  Notification,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  powerSaveBlocker,
+  screen,
+} from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import type { SelectedFile } from './preload';
-import { extractAudio } from './audio';
+import type { ExportedAudio, SelectedFile } from './preload';
+import { discardExport, exportAudio, extractAudio, isExport } from './audio';
 import { summarize } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
@@ -31,8 +41,9 @@ const boundsFile = (): string => path.join(app.getPath('userData'), 'window-stat
 
 // A saved position can point at a monitor that is no longer attached — drop it and let Electron center the window.
 const isOnSomeDisplay = (x: number, y: number, width: number, height: number): boolean =>
-  screen.getAllDisplays().some(({ workArea: a }) =>
-    x < a.x + a.width && x + width > a.x && y < a.y + a.height && y + height > a.y);
+  screen
+    .getAllDisplays()
+    .some(({ workArea: a }) => x < a.x + a.width && x + width > a.x && y < a.y + a.height && y + height > a.y);
 
 const readBounds = (): WindowBounds => {
   try {
@@ -113,8 +124,8 @@ const createWindow = () => {
       buttons: ['Продовжити', 'Перервати'],
       defaultId: 0,
       cancelId: 0,
-      message: 'Транскрипція ще триває',
-      detail: 'Якщо закрити вікно зараз, розпізнаний текст буде втрачено.',
+      message: 'Робота ще триває',
+      detail: 'Якщо закрити вікно зараз, результат буде втрачено.',
     });
 
     if (answer === 1) {
@@ -127,9 +138,7 @@ const createWindow = () => {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    window.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
+    window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
 };
 
@@ -150,22 +159,57 @@ ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
   return { path: filePath, name: path.basename(filePath), size };
 });
 
-ipcMain.handle('audio:extract', (_event, filePath: unknown): Promise<Float32Array> => {
-  if (typeof filePath !== 'string' || filePath.length === 0) throw new Error('audio:extract needs a file path');
-  return extractAudio(filePath);
-});
+const requirePath = (value: unknown, channel: string): string => {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${channel} needs a file path`);
+  return value;
+};
+
+ipcMain.handle('audio:extract', (_event, filePath: unknown): Promise<Float32Array> =>
+  extractAudio(requirePath(filePath, 'audio:extract')),
+);
+
+ipcMain.handle('audio:export', (_event, filePath: unknown): Promise<ExportedAudio> =>
+  exportAudio(requirePath(filePath, 'audio:export')),
+);
+
+/** Save dialog; null when the user cancels. */
+const askWhereToSave = async (
+  suggestedName: unknown,
+  fallback: string,
+  filter: Electron.FileFilter,
+): Promise<string | null> => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath: typeof suggestedName === 'string' ? suggestedName : fallback,
+    filters: [filter],
+  });
+  return canceled || !filePath ? null : filePath;
+};
 
 ipcMain.handle('file:save', async (_event, text: unknown, suggestedName: unknown): Promise<boolean> => {
   if (typeof text !== 'string') throw new Error('file:save needs text');
 
-  const { canceled, filePath } = await dialog.showSaveDialog({
-    defaultPath: typeof suggestedName === 'string' ? suggestedName : 'transcript.txt',
-    filters: [{ name: 'Текст', extensions: ['txt'] }],
-  });
-  if (canceled || !filePath) return false;
+  const target = await askWhereToSave(suggestedName, 'transcript.txt', { name: 'Текст', extensions: ['txt'] });
+  if (target === null) return false;
 
-  await fs.promises.writeFile(filePath, text, 'utf-8');
+  await fs.promises.writeFile(target, text, 'utf-8');
   return true;
+});
+
+ipcMain.handle('audio:save', async (_event, fromPath: unknown, suggestedName: unknown): Promise<boolean> => {
+  // Only the track we just produced may be copied out — the renderer never gets to name arbitrary sources.
+  if (typeof fromPath !== 'string' || !isExport(fromPath)) throw new Error('audio:save: unknown source file');
+
+  const target = await askWhereToSave(suggestedName, 'audio.ogg', { name: 'OGG (Opus)', extensions: ['ogg'] });
+  if (target === null) return false;
+
+  await fs.promises.copyFile(fromPath, target);
+  return true;
+});
+
+ipcMain.on('theme:set', (_event, theme: unknown) => {
+  if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return;
+  nativeTheme.themeSource = theme;
+  mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#171717' : '#ffffff');
 });
 
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
@@ -192,6 +236,8 @@ app.on('ready', () => {
   Menu.setApplicationMenu(null);
   createWindow();
 });
+
+app.on('will-quit', discardExport);
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

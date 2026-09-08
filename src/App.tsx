@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { AudioLinesIcon, ClipboardCopyIcon, DownloadIcon, FileVideoIcon, SparklesIcon, UploadIcon } from 'lucide-react';
+import {
+  AudioLinesIcon,
+  ClipboardCopyIcon,
+  DownloadIcon,
+  FileAudioIcon,
+  FileVideoIcon,
+  MonitorIcon,
+  MoonIcon,
+  RotateCcwIcon,
+  SparklesIcon,
+  SunIcon,
+  UploadIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
-import type { SelectedFile } from '@/preload';
+import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Device, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
@@ -21,22 +33,41 @@ const countWords = (text: string): number => (text.trim() ? text.trim().split(/\
 
 const deviceLabel: Record<Device, string> = { webgpu: 'WebGPU', wasm: 'WASM' };
 
+const THEME_KEY = 'theme';
+const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
+  { value: 'light', label: 'Світла', Icon: SunIcon },
+  { value: 'system', label: 'Як у системі', Icon: MonitorIcon },
+  { value: 'dark', label: 'Темна', Icon: MoonIcon },
+];
+
+const readTheme = (): Theme => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return themes.some((theme) => theme.value === saved) ? (saved as Theme) : 'system';
+  } catch {
+    return 'system';
+  }
+};
+
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Job = { label: string; value?: number };
 
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [theme, setTheme] = useState<Theme>(readTheme);
   const [download, setDownload] = useState(0);
   const [model, setModel] = useState<{ device: Device; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
-  const [converting, setConverting] = useState(false);
+  const [converting, setConverting] = useState(false); // decoding the file for the model
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
   const [summarizing, setSummarizing] = useState(false);
+  const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
+  const [audio, setAudio] = useState<ExportedAudio | null>(null);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
@@ -78,25 +109,44 @@ export default function App() {
     return () => worker.terminate();
   }, []);
 
-  const busy = converting || progress !== null;
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // a theme that does not survive a restart is not worth an error
+    }
+    window.api.setTheme(theme);
+  }, [theme]);
+
+  const busy = converting || progress !== null || exporting;
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
     setDragging(false);
   };
 
-  const pickFile = (picked: SelectedFile): void => {
-    setFile(picked);
+  const clearResults = (): void => {
     setTranscript('');
     setSummary('');
     setElapsed(null);
+    setAudio(null);
+  };
+
+  const pickFile = (picked: SelectedFile): void => {
+    setFile(picked);
+    clearResults();
+  };
+
+  const startOver = (): void => {
+    setFile(null);
+    clearResults();
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     stopDragging();
 
-    // A drop mid-run would wipe the transcript the worker is still streaming into.
+    // A drop mid-run would wipe the result the worker is still streaming into.
     const dropped = event.dataTransfer.files[0];
     if (!dropped || busy) return;
     pickFile({ path: window.api.getPathForFile(dropped), name: dropped.name, size: dropped.size });
@@ -111,19 +161,20 @@ export default function App() {
     toast.error(error instanceof Error ? error.message : String(error));
   };
 
+  const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
+  const extension = file?.name.split('.').pop() ?? '';
+
   const startTranscription = async (): Promise<void> => {
     if (!file || !workerRef.current) return;
 
-    setTranscript('');
-    setSummary('');
-    setElapsed(null);
+    clearResults();
     setPending(false);
     setConverting(true);
     startedAt.current = Date.now();
     try {
-      const audio = await window.api.extractAudio(file.path);
+      const samples = await window.api.extractAudio(file.path);
       setProgress(0);
-      workerRef.current.postMessage({ type: 'transcribe', audio } satisfies WorkerRequest, [audio.buffer]);
+      workerRef.current.postMessage({ type: 'transcribe', audio: samples } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
       failWith(error);
       setProgress(null);
@@ -132,15 +183,28 @@ export default function App() {
     }
   };
 
+  const convertToAudio = async (): Promise<void> => {
+    if (!file) return;
+
+    clearResults();
+    setExporting(true);
+    try {
+      setAudio(await window.api.exportAudio(file.path));
+    } catch (error) {
+      failWith(error);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const copy = async (text: string): Promise<void> => {
     await window.api.copyText(text);
     toast.success('Скопійовано');
   };
 
-  const saveTranscript = async (): Promise<void> => {
-    const base = file ? file.name.replace(/\.[^.]+$/, '') : 'transcript';
+  const save = async (saved: Promise<boolean>): Promise<void> => {
     try {
-      if (await window.api.saveText(transcript, `${base}.txt`)) toast.success('Збережено');
+      if (await saved) toast.success('Збережено');
     } catch (error) {
       failWith(error);
     }
@@ -172,29 +236,31 @@ export default function App() {
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
   const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
 
-  const job: Job | null = converting
-    ? { label: 'Конвертація аудіо' }
-    : progress !== null
-      ? { label: 'Транскрипція', value: progress }
-      : summarizing
-        ? { label: 'Готую вижимку' }
-        : modelStage === 'downloading'
-          ? { label: 'Завантаження моделі', value: download }
-          : modelStage === 'preparing'
-            ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
-            : null;
+  const job: Job | null = exporting
+    ? { label: 'Конвертація в аудіо' }
+    : converting
+      ? { label: 'Конвертація аудіо' }
+      : progress !== null
+        ? { label: 'Транскрипція', value: progress }
+        : summarizing
+          ? { label: 'Готую вижимку' }
+          : modelStage === 'downloading'
+            ? { label: 'Завантаження моделі', value: download }
+            : modelStage === 'preparing'
+              ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
+              : null;
 
   const status = busy
     ? 'Машина не засне до завершення'
     : model
-      ? `${transcript ? 'Готово' : 'Модель готова'} · ${deviceLabel[model.device]} · ${model.encoder}`
+      ? `${transcript || audio ? 'Готово' : 'Модель готова'} · ${deviceLabel[model.device]} · ${model.encoder}`
       : modelStage === 'preparing'
         ? 'Готую модель'
         : 'Завантажую модель';
 
-  // The window becomes a document once there is something to read, or something on its way.
-  const showDoc = busy || transcript !== '';
-  const [baseName, extension = ''] = file ? [file.name.replace(/\.[^.]+$/, ''), file.name.split('.').pop()] : [''];
+  // What the window is about right now: picking a file, reading a transcript, or holding an exported track.
+  const mode = audio || exporting ? 'audio' : transcript || busy ? 'transcript' : 'pick';
+  const done = transcript !== '' && !busy;
 
   const dropZone: ReactNode = (
     <div className="flex w-120 max-w-full flex-col gap-3.5">
@@ -217,7 +283,7 @@ export default function App() {
         </Button>
       </div>
 
-      {file && !showDoc && (
+      {file && mode === 'pick' && (
         <div className="flex items-center gap-3 rounded-[10px] border bg-background px-3 py-2.5" title={file.path}>
           <FileVideoIcon className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -227,6 +293,18 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+
+  const transcribeButton = (variant: 'default' | 'ghost'): ReactNode => (
+    <Button
+      variant={variant}
+      size="lg"
+      className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
+      disabled={!file || busy || pending || modelStage === 'failed'}
+      onClick={() => (model ? void startTranscription() : setPending(true))}
+    >
+      {busy && mode === 'transcript' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
+    </Button>
   );
 
   return (
@@ -244,25 +322,31 @@ export default function App() {
       }}
       onDrop={handleDrop}
     >
-      {showDoc ? (
+      {mode === 'pick' ? (
+        <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
+      ) : (
         <div className="absolute inset-0 overflow-y-auto">
           <div className="mx-auto w-170 max-w-full px-6 pt-22 pb-30">
             <h1 className="mb-1.5 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
               {baseName}
             </h1>
             <p className="mb-9 text-center text-[13px] text-muted-foreground">
-              {file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
+              {audio
+                ? `OGG · Opus · ${formatSize(audio.size)}`
+                : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
               {elapsed !== null && ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
-              {!busy && (
-                <>
-                  {' · '}
-                  <button className="underline-offset-4 hover:text-foreground hover:underline" onClick={chooseFile}>
-                    Інший файл
-                  </button>
-                </>
-              )}
             </p>
-            <div className="text-base leading-[1.8] whitespace-pre-wrap">{transcript}</div>
+
+            {mode === 'audio' ? (
+              audio && (
+                <div className="flex items-center justify-center gap-3 text-muted-foreground">
+                  <FileAudioIcon className="size-5" strokeWidth={1.75} />
+                  <span>Аудіодоріжку витягнуто. Збережи її або запусти транскрипцію.</span>
+                </div>
+              )
+            ) : (
+              <div className="text-base leading-[1.8] whitespace-pre-wrap">{transcript}</div>
+            )}
 
             {summary && (
               <section className="mt-10 border-t pt-7">
@@ -280,11 +364,9 @@ export default function App() {
             )}
           </div>
         </div>
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
       )}
 
-      {showDoc && dragging && !busy && (
+      {mode !== 'pick' && dragging && !busy && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 pb-15 backdrop-blur-sm">
           {dropZone}
         </div>
@@ -293,6 +375,32 @@ export default function App() {
       <div className="absolute top-5 left-6 flex items-center gap-2 text-muted-foreground">
         <AudioLinesIcon className="size-4" />
         <span className="text-[13px] font-medium text-foreground">MagScribe</span>
+      </div>
+
+      <div className="absolute top-4 right-5 flex items-center gap-2">
+        {mode !== 'pick' && !busy && (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={startOver}>
+            <RotateCcwIcon /> Почати заново
+          </Button>
+        )}
+        <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
+          {themes.map(({ value, label, Icon }) => (
+            <Button
+              key={value}
+              variant="ghost"
+              size="icon-xs"
+              title={label}
+              aria-pressed={theme === value}
+              className={cn(
+                'size-6.5 rounded-[7px] text-muted-foreground',
+                theme === value && 'bg-muted text-foreground',
+              )}
+              onClick={() => setTheme(value)}
+            >
+              <Icon className="size-3.5" />
+            </Button>
+          ))}
+        </div>
       </div>
 
       {job && (
@@ -316,56 +424,82 @@ export default function App() {
         </div>
       )}
 
+      {/* A grid, not two absolutes: the status can never slide under the pill on a narrow window. */}
       <div
         className={cn(
-          'absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-card p-1.5',
-          'ring-1 ring-border shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
+          'pointer-events-none absolute inset-x-0 bottom-0 grid grid-cols-[1fr_auto_1fr] items-end gap-4 px-6 pb-6',
         )}
       >
-        <Button
-          size="lg"
-          className="rounded-full px-4.5"
-          disabled={!file || busy || pending || modelStage === 'failed'}
-          onClick={() => (model ? void startTranscription() : setPending(true))}
+        <p
+          className={cn(
+            'pointer-events-auto pb-2.5 text-xs',
+            modelError ? 'text-destructive' : 'text-muted-foreground',
+          )}
+          title={fallback ?? undefined}
         >
-          {busy ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
-        </Button>
-        <div className="mx-1 h-5 w-px bg-border" />
-        <Button
-          variant="ghost"
-          size="lg"
-          className="rounded-full px-3.5"
-          disabled={!transcript}
-          onClick={() => copy(transcript)}
-        >
-          <ClipboardCopyIcon /> Копіювати
-        </Button>
-        <Button
-          variant="ghost"
-          size="lg"
-          className="rounded-full px-3.5"
-          disabled={!transcript}
-          onClick={saveTranscript}
-        >
-          <DownloadIcon /> Зберегти .txt
-        </Button>
-        <Button
-          variant="ghost"
-          size="lg"
-          className="rounded-full px-3.5"
-          disabled={!transcript || summarizing}
-          onClick={makeSummary}
-        >
-          <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вижимка'}
-        </Button>
-      </div>
+          {modelError ?? status}
+        </p>
 
-      <p
-        className={cn('absolute bottom-8.5 left-6 text-xs', modelError ? 'text-destructive' : 'text-muted-foreground')}
-        title={fallback ?? undefined}
-      >
-        {modelError ?? status}
-      </p>
+        <div
+          className={cn(
+            'pointer-events-auto flex items-center gap-1 rounded-full bg-card p-1.5',
+            'ring-1 ring-border shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
+          )}
+        >
+          {mode === 'pick' && (
+            <>
+              {transcribeButton('default')}
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                disabled={!file}
+                onClick={convertToAudio}
+              >
+                <FileAudioIcon /> Конвертувати в аудіо
+              </Button>
+            </>
+          )}
+          {mode === 'transcript' && (
+            <>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                disabled={!done}
+                onClick={() => copy(transcript)}
+              >
+                <ClipboardCopyIcon /> Копіювати
+              </Button>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                disabled={!done}
+                onClick={() => save(window.api.saveText(transcript, `${baseName}.txt`))}
+              >
+                <DownloadIcon /> Зберегти .txt
+              </Button>
+              <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
+                <SparklesIcon /> {summarizing ? 'Готую вижимку…' : 'Вижимка'}
+              </Button>
+            </>
+          )}
+          {mode === 'audio' && (
+            <>
+              <Button
+                size="lg"
+                className="rounded-full px-4.5"
+                disabled={!audio}
+                onClick={() => audio && save(window.api.saveAudio(audio.path, `${baseName}.ogg`))}
+              >
+                <DownloadIcon /> Зберегти .ogg
+              </Button>
+              {transcribeButton('ghost')}
+            </>
+          )}
+        </div>
+      </div>
 
       <Toaster />
     </div>
