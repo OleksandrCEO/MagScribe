@@ -13,9 +13,11 @@ import {
   SunIcon,
   UploadIcon,
 } from 'lucide-react';
+import Markdown from 'react-markdown';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
+import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -47,6 +49,10 @@ const readTheme = (): Theme => {
     return 'system';
   }
 };
+
+// The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
+const panelClass =
+  'min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-background px-7 py-6 text-[15px] leading-[1.7] [scrollbar-width:thin]';
 
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Job = { label: string; value?: number };
@@ -364,15 +370,21 @@ export default function App() {
                   <span>Аудіодоріжку витягнуто. Збережи її або запусти транскрибацію.</span>
                 </div>
               )
-            ) : (
-              <div
-                className={cn(
-                  'min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-background px-7 py-6 [scrollbar-width:thin]',
-                  'text-[15px] leading-[1.7] whitespace-pre-wrap',
-                )}
-              >
-                {screen === 'summary' ? summary : transcript}
+            ) : screen === 'summary' ? (
+              <div className={cn(panelClass, 'markdown')}>
+                <Markdown>{summary}</Markdown>
               </div>
+            ) : (
+              // Editable so misheard names can be fixed in place; the worker still streams into it while it runs.
+              <Textarea
+                className={cn(
+                  panelClass,
+                  'field-sizing-fixed resize-none border-border focus-visible:ring-0 md:text-[15px] dark:bg-background',
+                )}
+                value={transcript}
+                readOnly={busy}
+                onChange={(event) => setTranscript(event.target.value)}
+              />
             )}
           </div>
         </div>

@@ -126,6 +126,46 @@
   }
 }
 
+/* The summary arrives as Markdown (headings, lists, bold); preflight strips their defaults, so give them back. */
+.markdown :is(h1, h2, h3) {
+  margin: 1.25em 0 0.5em;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 0 0 0.75em;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li {
+  margin: 0.25em 0;
+}
+.markdown strong {
+  font-weight: 600;
+}
+.markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--muted);
+  font-size: 0.9em;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
