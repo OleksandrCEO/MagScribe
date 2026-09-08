@@ -4,6 +4,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import type { SelectedFile } from './preload';
 import { extractAudio } from './audio';
+import { summarize } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -114,6 +115,26 @@ ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
 ipcMain.handle('audio:extract', (_event, filePath: unknown): Promise<Float32Array> => {
   if (typeof filePath !== 'string' || filePath.length === 0) throw new Error('audio:extract needs a file path');
   return extractAudio(filePath);
+});
+
+ipcMain.handle('file:save', async (_event, text: unknown, suggestedName: unknown): Promise<boolean> => {
+  if (typeof text !== 'string') throw new Error('file:save needs text');
+
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath: typeof suggestedName === 'string' ? suggestedName : 'transcript.txt',
+    filters: [{ name: 'Текст', extensions: ['txt'] }],
+  });
+  if (canceled || !filePath) return false;
+
+  await fs.promises.writeFile(filePath, text, 'utf-8');
+  return true;
+});
+
+ipcMain.handle('summary:run', (_event, transcript: unknown): Promise<string> => {
+  if (typeof transcript !== 'string' || transcript.trim().length === 0) {
+    throw new Error('summary:run needs a transcript');
+  }
+  return summarize(transcript);
 });
 
 // This method will be called when Electron has finished

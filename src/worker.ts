@@ -27,9 +27,9 @@ export type WorkerResponse =
 
 // Quantisation per this checkpoint's model card: fp16 encoder + q4 decoder on WebGPU. Not every adapter
 // implements shader-f16 though (NVIDIA under Vulkan does not), and the fp32 encoder keeps its weights in a
-// 2.5 GB side file, so without fp16 the encoder goes 4-bit as well — 425 MB, and the same MatMulNBits path
-// the decoder already uses. On wasm both halves are 4-bit too: q8 weights of this model fail to load in
-// onnxruntime-web with a missing-scale error.
+// 2.5 GB side file, so without fp16 the encoder goes 4-bit as well. Measured against int8 on this adapter:
+// same text, 40-44 s per chunk instead of 4.5-5.3 s, because onnxruntime has no WebGPU kernels for those
+// int8 ops. On wasm both halves are 4-bit too: the int8 *decoder* fails to load there with a missing scale.
 const deviceOptions = async (device: Device) => {
   if (device === 'wasm') return { device, dtype: { encoder_model: 'q4', decoder_model_merged: 'q4' } } as const;
 

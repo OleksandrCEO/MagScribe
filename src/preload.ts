@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { clipboard, contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export type SelectedFile = { path: string; name: string; size: number };
 
@@ -10,6 +10,10 @@ const api = {
   // Transcription itself runs in a renderer worker; main only turns media into samples it can chew on.
   extractAudio: (filePath: string): Promise<Float32Array> => ipcRenderer.invoke('audio:extract', filePath),
   summarize: (transcript: string): Promise<string> => ipcRenderer.invoke('summary:run', transcript),
+  // Returns false when the user cancels the save dialog.
+  saveText: (text: string, suggestedName: string): Promise<boolean> =>
+    ipcRenderer.invoke('file:save', text, suggestedName),
+  copyText: (text: string): Promise<void> => clipboard.writeText(text),
 };
 
 contextBridge.exposeInMainWorld('api', api);
