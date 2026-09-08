@@ -105,6 +105,11 @@ export default function App() {
       }
     });
 
+    window.api.onGpuGone((message) => {
+      setModelError(`${message}. Перезапусти застосунок.`);
+      setProgress(null);
+    });
+
     worker.postMessage({ type: 'load' } satisfies WorkerRequest);
     return () => worker.terminate();
   }, []);

@@ -24,6 +24,10 @@ const api = {
   // Main flips nativeTheme, so prefers-color-scheme (and with it the whole CSS theme) follows the choice.
   setTheme: (theme: Theme): void => ipcRenderer.send('theme:set', theme),
   notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
+  // Main reports a crashed GPU process here; the model is gone with it, so the UI must stop waiting.
+  onGpuGone: (listener: (message: string) => void): void => {
+    ipcRenderer.on('gpu:gone', (_event, message: unknown) => listener(String(message)));
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

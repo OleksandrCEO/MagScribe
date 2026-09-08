@@ -244,6 +244,15 @@ app.on('ready', () => {
 
 app.on('will-quit', discardExport);
 
+// A dead GPU process takes the WebGPU device and the model with it; the renderer would otherwise wait forever at 0 %.
+app.on('child-process-gone', (_event, details) => {
+  if (details.type !== 'GPU') return;
+  const line = `${new Date().toISOString()} GPU process gone: ${details.reason}, exit code ${details.exitCode}`;
+  console.error(line);
+  fs.appendFile(path.join(app.getPath('userData'), 'gpu.log'), `${line}\n`, () => {});
+  mainWindow?.webContents.send('gpu:gone', `GPU-процес завершився (${details.reason}, код ${details.exitCode})`);
+});
+
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
