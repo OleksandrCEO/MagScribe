@@ -30,6 +30,7 @@ export default function App() {
   const [transcript, setTranscript] = useState('');
   const [summary, setSummary] = useState('');
   const [summarizing, setSummarizing] = useState(false);
+  const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -102,6 +103,7 @@ export default function App() {
 
     setTranscript('');
     setSummary('');
+    setPending(false);
     setConverting(true);
     try {
       const audio = await window.api.extractAudio(file.path);
@@ -146,6 +148,13 @@ export default function App() {
   useEffect(() => {
     window.api.setWorking(busy);
   }, [busy]);
+
+  // Loading the model takes a few seconds on every start — let the click wait for it instead of the person.
+  useEffect(() => {
+    if (!pending || device === null || busy) return;
+    setPending(false);
+    void startTranscription();
+  }, [pending, device, busy]);
 
   const modelReady = device !== null;
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
@@ -230,8 +239,11 @@ export default function App() {
           </div>
         )}
 
-        <Button disabled={!file || !modelReady || busy} onClick={startTranscription}>
-          {busy ? 'Транскрибую…' : modelStage === 'ready' ? 'Транскрибувати' : 'Чекаю на модель…'}
+        <Button
+          disabled={!file || busy || pending || modelStage === 'failed'}
+          onClick={() => (modelReady ? void startTranscription() : setPending(true))}
+        >
+          {busy ? 'Транскрибую…' : pending ? 'Почну, щойно модель завантажиться' : 'Транскрибувати'}
         </Button>
 
         {fallback && <p className="text-xs text-muted-foreground">{fallback}</p>}
