@@ -14,7 +14,10 @@ const STRIDE_LENGTH_S = 5;
 
 export type Device = 'webgpu' | 'wasm';
 
-export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Float32Array };
+// null lets Whisper detect the language itself, per 30-second chunk.
+export type Language = 'uk' | 'en' | null;
+
+export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Float32Array; language: Language };
 
 export type WorkerResponse =
   | { type: 'download'; progress: number } // model download, 0..100
@@ -84,7 +87,7 @@ const load = async (): Promise<void> => {
   }
 };
 
-const transcribe = async (audio: Float32Array): Promise<void> => {
+const transcribe = async (audio: Float32Array, language: Language): Promise<void> => {
   if (!transcriber) throw new Error('Модель ще не завантажена');
 
   // Same window arithmetic the pipeline uses internally, so the percentage matches the real chunk count.
@@ -112,7 +115,7 @@ const transcribe = async (audio: Float32Array): Promise<void> => {
   });
 
   const output = await transcriber(audio, {
-    language: 'uk',
+    ...(language && { language }),
     task: 'transcribe',
     chunk_length_s: CHUNK_LENGTH_S,
     stride_length_s: STRIDE_LENGTH_S,
@@ -124,7 +127,7 @@ const transcribe = async (audio: Float32Array): Promise<void> => {
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
-  const done = request.type === 'load' ? load() : transcribe(request.audio);
+  const done = request.type === 'load' ? load() : transcribe(request.audio, request.language);
 
   done.catch((error: unknown) => {
     post({ type: 'error', message: error instanceof Error ? error.message : String(error) });

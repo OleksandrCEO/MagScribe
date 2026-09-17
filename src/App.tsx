@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import type { WorkerRequest, WorkerResponse } from '@/worker';
+import type { Language, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
 const formatSize = (bytes: number): string => {
@@ -39,6 +39,12 @@ const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Світла', Icon: SunIcon },
   { value: 'system', label: 'Як у системі', Icon: MonitorIcon },
   { value: 'dark', label: 'Темна', Icon: MoonIcon },
+];
+
+const languages: { value: Language; label: string; title: string }[] = [
+  { value: null, label: 'Авто', title: 'Визначити мову автоматично' },
+  { value: 'uk', label: 'UK', title: 'Українська' },
+  { value: 'en', label: 'EN', title: 'Англійська' },
 ];
 
 const readTheme = (): Theme => {
@@ -61,6 +67,7 @@ export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
+  const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -189,7 +196,7 @@ export default function App() {
     try {
       const samples = await window.api.extractAudio(file.path);
       setProgress(0);
-      workerRef.current.postMessage({ type: 'transcribe', audio: samples } satisfies WorkerRequest, [samples.buffer]);
+      workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
       failWith(error);
       setProgress(null);
@@ -547,6 +554,26 @@ export default function App() {
               {transcribeButton('ghost')}
             </>
           )}
+        </div>
+
+        {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill. */}
+        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end pb-1.5 text-xs">
+          {languages.map(({ value, label, title }) => (
+            <button
+              key={label}
+              type="button"
+              title={title}
+              aria-pressed={language === value}
+              disabled={busy}
+              className={cn(
+                'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
+                language === value && 'font-medium text-foreground',
+              )}
+              onClick={() => setLanguage(value)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
