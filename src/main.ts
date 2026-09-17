@@ -6,11 +6,14 @@ import {
   dialog,
   ipcMain,
   nativeTheme,
+  net,
   powerSaveBlocker,
+  protocol,
   screen,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { discardExport, exportAudio, extractAudio, isExport } from './audio';
@@ -30,6 +33,22 @@ if (process.platform === 'linux') {
 // DawnWebGPUCache and Whisper builds hundreds of them at ~20 KB each, so the cache kept evicting itself and
 // every cold start recompiled all shaders: minutes at 0 % with the GPU process on five cores. 512 MB holds the set.
 app.commandLine.appendSwitch('gpu-disk-cache-size-kb', String(512 * 1024));
+
+// Chromium refuses CacheStorage on file://, and @huggingface/transformers treats that as "no cache available"
+// and re-downloads the model — the packaged app pulled the whole Whisper checkpoint from HuggingFace on every
+// launch, while the dev server (http://localhost) cached it fine. A standard+secure scheme gives the renderer a
+// real origin, which is what the Cache API keys on. Must be called before `ready`.
+const APP_SCHEME = 'app';
+const APP_ORIGIN = `${APP_SCHEME}://bundle`;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    // secure: CacheStorage needs a secure context. supportFetchAPI: the module worker and the onnxruntime .wasm
+    // are fetched from this origin. corsEnabled: the worker fetches model files from huggingface.co.
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+]);
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -140,11 +159,21 @@ const createWindow = () => {
   });
 
   // and load the index.html of the app.
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
-  }
+  window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL || `${APP_ORIGIN}/index.html`);
+};
+
+const rendererRoot = (): string => path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}`);
+
+/** Serves the built renderer over app://. Anything resolving outside the bundle directory is refused. */
+const serveBundle = async (request: Request): Promise<Response> => {
+  const root = rendererRoot();
+  const { pathname } = new URL(request.url);
+  const file = path.join(root, decodeURIComponent(pathname));
+
+  // path.join normalises the "..", so this catches both plain and percent-encoded traversal.
+  if (file !== root && !file.startsWith(root + path.sep)) return new Response(null, { status: 403 });
+
+  return net.fetch(pathToFileURL(file).toString());
 };
 
 // The renderer never touches the filesystem: it gets a path only from this native dialog.
@@ -240,6 +269,7 @@ ipcMain.handle('summary:run', (_event, transcript: unknown): Promise<string> => 
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
   Menu.setApplicationMenu(null);
+  if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) protocol.handle(APP_SCHEME, serveBundle);
   createWindow();
 });
 
