@@ -7,6 +7,7 @@ import {
   ClipboardCopyIcon,
   DownloadIcon,
   FileAudioIcon,
+  FileTextIcon,
   FileVideoIcon,
   ListOrderedIcon,
   MonitorIcon,
@@ -22,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import { AboutDialog, MODES, MODE_KEY, SettingsDialog, readSetting, writeSetting, type Mode } from '@/settings';
+import { AboutDialog, SettingsDialog, readSetting, writeSetting } from '@/settings';
 import { toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -55,10 +56,9 @@ const languages: { value: Language; label: string; title: string }[] = [
 ];
 
 const THEME_VALUES = themes.map(({ value }) => value);
-const MODE_VALUES = MODES.map(({ value }) => value);
 
-// Which of the result screens is on. The two modes double as views: a run lands on the one it was started as.
-type View = Mode | 'summary' | 'chapters';
+// One run, four ways to read it. A finished run always lands on the transcript; the rest are a click away.
+type View = 'transcript' | 'subtitles' | 'summary' | 'chapters';
 
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
 const panelClass =
@@ -71,7 +71,6 @@ export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'system'));
-  const [mode, setMode] = useState<Mode>(() => readSetting(MODE_KEY, MODE_VALUES, 'transcript'));
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
   const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
@@ -87,11 +86,11 @@ export default function App() {
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
   const [chapters, setChapters] = useState('');
-  const [view, setView] = useState<View>(mode); // each result has its own screen over the transcript
+  const [view, setView] = useState<View>('transcript'); // each result has its own screen over the transcript
   const [aiTask, setAiTask] = useState<'summary' | 'chapters' | null>(null); // what the claude CLI is chewing on
   const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
-  const [pending, setPending] = useState<Mode | null>(null); // asked to transcribe before the model finished loading
+  const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -145,8 +144,6 @@ export default function App() {
     window.api.setTheme(theme);
   }, [theme]);
 
-  useEffect(() => writeSetting(MODE_KEY, mode), [mode]);
-
   const busy = converting || progress !== null || exporting;
 
   const stopDragging = (): void => {
@@ -160,7 +157,7 @@ export default function App() {
     setSubtitles('');
     setSummary('');
     setChapters('');
-    setView(mode);
+    setView('transcript');
     setElapsed(null);
     setAudio(null);
   };
@@ -197,12 +194,11 @@ export default function App() {
   const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
   const extension = file?.name.split('.').pop() ?? '';
 
-  const startTranscription = async (target: Mode): Promise<void> => {
+  const startTranscription = async (): Promise<void> => {
     if (!file || !workerRef.current) return;
 
     clearResults();
-    setView(target);
-    setPending(null);
+    setPending(false);
     setConversion(0);
     setConverting(true);
     startedAt.current = Date.now();
@@ -270,9 +266,8 @@ export default function App() {
   // Loading the model takes a few seconds on every start — let the click wait for it instead of the person.
   useEffect(() => {
     if (!pending || model === null || busy) return;
-    const target = pending;
-    setPending(null);
-    void startTranscription(target);
+    setPending(false);
+    void startTranscription();
   }, [pending, model, busy]);
 
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
@@ -304,11 +299,10 @@ export default function App() {
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
   const stage = audio || exporting ? 'audio' : transcript || busy ? 'text' : 'pick';
-  // A run the model gave no usable timestamps for has nothing to show as subtitles — keep the text instead.
-  const resultView: View = view === 'subtitles' && segments.length === 0 ? 'transcript' : view;
-  // While it runs you watch the text stream in; the chosen view only takes over once there is a result.
-  const screen = stage !== 'text' ? stage : busy ? 'transcript' : resultView;
+  // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
+  const screen = stage === 'text' ? view : stage;
   const done = transcript !== '' && !busy;
+  const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
   // Transcript, .srt and chapters are three editable texts; only the source differs.
   const panelText = screen === 'subtitles' ? subtitles : screen === 'chapters' ? chapters : transcript;
   const setPanelText = screen === 'subtitles' ? setSubtitles : screen === 'chapters' ? setChapters : setTranscript;
@@ -346,12 +340,22 @@ export default function App() {
     </div>
   );
 
-  // Both starts run the same transcription — they differ only in the screen it lands on. The mode from the
-  // settings leads the pill; the other stays one click away for a single file.
-  const starts: Mode[] = mode === 'subtitles' ? ['subtitles', 'transcript'] : ['transcript', 'subtitles'];
+  // The lead button follows what is on screen: the text leads to a summary, the .srt leads to chapters.
+  const summaryButton: ReactNode = summary ? (
+    <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('summary')}>
+      <SparklesIcon /> Конспект
+    </Button>
+  ) : (
+    <Button
+      size="lg"
+      className="rounded-full px-4.5"
+      disabled={!done || aiTask !== null}
+      onClick={() => runAi('summary')}
+    >
+      <SparklesIcon /> {aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}
+    </Button>
+  );
 
-  // The subtitle chain ends in chapters, so the same button leads there from the transcript and from the .srt.
-  // In subtitles mode it takes the lead slot that the summary holds in text mode.
   const chaptersButton: ReactNode = chapters ? (
     <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('chapters')}>
       <ListOrderedIcon /> Таймкоди
@@ -367,23 +371,15 @@ export default function App() {
     </Button>
   );
 
-  const startButton = (target: Mode, variant: 'default' | 'ghost'): ReactNode => (
+  const transcribeButton = (variant: 'default' | 'ghost'): ReactNode => (
     <Button
-      key={target}
       variant={variant}
       size="lg"
       className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
-      disabled={!file || busy || pending !== null || modelStage === 'failed'}
-      onClick={() => (model ? void startTranscription(target) : setPending(target))}
+      disabled={!file || busy || pending || modelStage === 'failed'}
+      onClick={() => (model ? void startTranscription() : setPending(true))}
     >
-      {target === 'subtitles' && <CaptionsIcon />}
-      {busy && stage === 'text'
-        ? 'Транскрибую…'
-        : pending === target
-          ? 'Чекаю на модель…'
-          : target === 'subtitles'
-            ? 'Субтитри'
-            : 'Транскрибувати'}
+      {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
     </Button>
   );
 
@@ -574,7 +570,7 @@ export default function App() {
         >
           {stage === 'pick' && (
             <>
-              {starts.map((target, index) => startButton(target, index === 0 ? 'default' : 'ghost'))}
+              {transcribeButton('default')}
               <Button
                 variant="ghost"
                 size="lg"
@@ -586,14 +582,15 @@ export default function App() {
               </Button>
             </>
           )}
-          {screen === 'transcript' && (
+          {/* The text and the .srt are the same run, so they share one row: copy, save, swap, and what is next. */}
+          {(screen === 'transcript' || onSubtitles) && (
             <>
               <Button
                 variant="ghost"
                 size="lg"
                 className="rounded-full px-3.5"
                 disabled={!done}
-                onClick={() => copy(transcript)}
+                onClick={() => copy(onSubtitles ? subtitles : transcript)}
               >
                 <ClipboardCopyIcon /> Копіювати
               </Button>
@@ -602,57 +599,30 @@ export default function App() {
                 size="lg"
                 className="rounded-full px-3.5"
                 disabled={!done}
-                onClick={() => save(window.api.saveText(transcript, `${baseName}.txt`))}
+                onClick={() =>
+                  save(
+                    window.api.saveText(
+                      onSubtitles ? subtitles : transcript,
+                      `${baseName}${onSubtitles ? '.srt' : '.txt'}`,
+                    ),
+                  )
+                }
               >
-                <DownloadIcon /> Зберегти .txt
+                <DownloadIcon /> {onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}
               </Button>
-              {/* Shown from the first second of a subtitles run, so the pill says what this run is for. */}
-              {(view === 'subtitles' || segments.length > 0) && (
+              {segments.length > 0 && (
                 <Button
                   variant="ghost"
                   size="lg"
                   className="rounded-full px-3.5"
-                  disabled={!done || segments.length === 0}
-                  onClick={() => setView('subtitles')}
+                  disabled={!done}
+                  onClick={() => setView(onSubtitles ? 'transcript' : 'subtitles')}
                 >
-                  <CaptionsIcon /> Субтитри
+                  {onSubtitles ? <FileTextIcon /> : <CaptionsIcon />}
+                  {onSubtitles ? 'Текст' : 'Субтитри'}
                 </Button>
               )}
-              {view === 'subtitles' ? (
-                chaptersButton
-              ) : summary ? (
-                <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('summary')}>
-                  <SparklesIcon /> Конспект
-                </Button>
-              ) : (
-                <Button
-                  size="lg"
-                  className="rounded-full px-4.5"
-                  disabled={!done || aiTask !== null}
-                  onClick={() => runAi('summary')}
-                >
-                  <SparklesIcon /> {aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}
-                </Button>
-              )}
-            </>
-          )}
-          {screen === 'subtitles' && (
-            <>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('transcript')}>
-                <ArrowLeftIcon /> До тексту
-              </Button>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(subtitles)}>
-                <ClipboardCopyIcon /> Копіювати
-              </Button>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                onClick={() => save(window.api.saveText(subtitles, `${baseName}.srt`))}
-              >
-                <DownloadIcon /> Зберегти .srt
-              </Button>
-              {chaptersButton}
+              {onSubtitles ? chaptersButton : summaryButton}
             </>
           )}
           {screen === 'chapters' && (
@@ -699,39 +669,33 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .ogg
               </Button>
-              {startButton(mode, 'ghost')}
+              {transcribeButton('ghost')}
             </>
           )}
         </div>
 
-        {/* Its own group, shaped like the theme switch: still set once per file, but now it reads as a control. */}
-        <div
-          className={cn(
-            'pointer-events-auto mb-1.5 flex items-center gap-0.5 justify-self-end',
-            'rounded-[10px] border bg-background p-[3px]',
-          )}
-        >
+        {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill. */}
+        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end pb-1.5 text-xs">
           {languages.map(({ value, label, title }) => (
-            <Button
+            <button
               key={label}
-              variant="ghost"
-              size="xs"
+              type="button"
               title={title}
               aria-pressed={language === value}
               disabled={busy}
               className={cn(
-                'h-6.5 rounded-[7px] px-2 text-muted-foreground',
-                language === value && 'bg-muted text-foreground',
+                'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
+                language === value && 'font-medium text-foreground',
               )}
               onClick={() => setLanguage(value)}
             >
               {label}
-            </Button>
+            </button>
           ))}
         </div>
       </div>
 
-      <SettingsDialog open={dialog === 'settings'} mode={mode} onMode={setMode} onClose={() => setDialog(null)} />
+      <SettingsDialog open={dialog === 'settings'} onClose={() => setDialog(null)} />
       <AboutDialog
         open={dialog === 'about'}
         engine={model && `${model.adapter} · ${model.encoder}`}

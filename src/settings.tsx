@@ -3,16 +3,6 @@ import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from 'cn';
 
-/** What a finished run opens on — and with it, which button leads the pill when a file is picked. */
-export type Mode = 'transcript' | 'subtitles';
-
-export const MODE_KEY = 'mode';
-
-export const MODES: { value: Mode; label: string; hint: string }[] = [
-  { value: 'transcript', label: 'Текст і конспект', hint: 'Транскрипт, далі «Вловити суть»' },
-  { value: 'subtitles', label: 'Субтитри й таймкоди', hint: 'Файл .srt, далі розділи для YouTube і Telegram' },
-];
-
 // localStorage is keyed per origin and survives restarts. It can still throw (blocked storage), and a setting
 // that does not come back is not worth an error on screen.
 export const readSetting = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
@@ -75,36 +65,14 @@ function Modal({ open, title, onClose, children }: ModalProps) {
   );
 }
 
-type SettingsProps = { open: boolean; mode: Mode; onMode: (mode: Mode) => void; onClose: () => void };
-
-export function SettingsDialog({ open, mode, onMode, onClose }: SettingsProps) {
+/** Empty on purpose: the window is here, its contents arrive with the engine picker (docs/concept.md). */
+export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Modal open={open} title="Налаштування" onClose={onClose}>
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[13px] font-medium">Режим за замовчуванням</span>
-          <span className="text-xs text-muted-foreground">
-            Перша кнопка в панелі і екран, яким завершується транскрибація. У панелі режим завжди можна
-            перемкнути на один файл.
-          </span>
-        </div>
-        {MODES.map(({ value, label, hint }) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={mode === value}
-            onClick={() => onMode(value)}
-            className={cn(
-              'flex flex-col gap-0.5 rounded-xl border bg-background px-4 py-3 text-left transition-colors',
-              'hover:bg-muted/60',
-              mode === value && 'border-foreground/35 bg-muted hover:bg-muted',
-            )}
-          >
-            <span className="text-[13.5px] font-medium">{label}</span>
-            <span className="text-xs text-muted-foreground">{hint}</span>
-          </button>
-        ))}
-      </div>
+      <p className="text-[13px] leading-[1.6] text-muted-foreground">
+        Поки що порожньо. Сюди переїде вибір рушія: розшифровувати локальною моделлю чи хмарним сервісом за
+        ключем, і чим робити конспект і таймкоди.
+      </p>
     </Modal>
   );
 }
@@ -116,17 +84,14 @@ export function AboutDialog({ open, engine, onClose }: { open: boolean; engine: 
       <div className="flex flex-col gap-3 text-[13px] leading-[1.6] text-muted-foreground">
         <p>
           <span className="font-medium text-foreground">MagScribe {__APP_VERSION__}</span> — транскрибація відео
-          й аудіо на твоїй машині.
+          й аудіо: текст, субтитри .srt і таймкоди розділів.
         </p>
         <p>
-          Whisper large-v3-turbo рахує тут, локально: ні файл, ні звук нікуди не йдуть
-          {engine && <span className="text-foreground"> ({engine})</span>}. З мережі завантажується лише сама
-          модель, один раз.
+          Зараз розшифровує Whisper large-v3-turbo на цій машині
+          {engine && <span className="text-foreground"> ({engine})</span>}, а конспект і таймкоди пише команда{' '}
+          <code>claude</code> — тобто транскрипт для них іде в Anthropic.
         </p>
-        <p>
-          Виняток — конспект і таймкоди: вони передають транскрипт команді <code>claude</code>, а та звертається
-          до Anthropic.
-        </p>
+        <p>Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.</p>
       </div>
     </Modal>
   );
