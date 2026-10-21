@@ -61,6 +61,18 @@ const THEME_VALUES = themes.map(({ value }) => value);
 // One run, four ways to read it. A finished run always lands on the transcript; the rest are a click away.
 type View = 'transcript' | 'subtitles' | 'summary' | 'chapters';
 
+type Screen = View | 'pick' | 'audio';
+
+// What the system title bar says, one word per screen. Empty leaves the bare app name.
+const SCREEN_TITLES: Record<Screen, string> = {
+  pick: '',
+  transcript: 'текст',
+  subtitles: 'субтитри',
+  summary: 'конспект',
+  chapters: 'таймкоди',
+  audio: 'аудіо',
+};
+
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
 const panelClass =
   'min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-background px-7 py-6 text-[15px] leading-[1.7] [scrollbar-width:thin]';
@@ -312,9 +324,20 @@ export default function App() {
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
   const stage = audio || exporting ? 'audio' : transcript || busy ? 'text' : 'pick';
   // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
-  const screen = stage === 'text' ? view : stage;
+  const screen: Screen = stage === 'text' ? view : stage;
   const done = transcript !== '' && !busy;
   const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
+
+  // Electron takes the window title from the document, so the taskbar can say which screen is open.
+  const titleSuffix = exporting
+    ? 'конвертація'
+    : converting || progress !== null
+      ? 'транскрибація'
+      : SCREEN_TITLES[screen];
+
+  useEffect(() => {
+    document.title = titleSuffix ? `MagScribe — ${titleSuffix}` : 'MagScribe';
+  }, [titleSuffix]);
   // Transcript, .srt and chapters are three editable texts; only the source differs.
   const panelText = screen === 'subtitles' ? subtitles : screen === 'chapters' ? chapters : transcript;
   const setPanelText = screen === 'subtitles' ? setSubtitles : screen === 'chapters' ? setChapters : setTranscript;
