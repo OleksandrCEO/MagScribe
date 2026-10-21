@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>MagScribe</title>
+  <rect width="512" height="512" rx="112" fill="#171717"/>
+  <g fill="#fafafa">
+    <rect x="120" y="216" width="26" height="80" rx="13"/>
+    <rect x="174" y="176" width="26" height="160" rx="13"/>
+    <rect x="228" y="136" width="26" height="240" rx="13"/>
+    <rect x="282" y="192" width="26" height="128" rx="13"/>
+  </g>
+  <rect x="336" y="216" width="26" height="80" rx="13" fill="#f59e0b"/>
+</svg>

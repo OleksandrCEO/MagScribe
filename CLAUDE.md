@@ -21,6 +21,7 @@ Local-first desktop app: converts video/audio files and transcribes them. Everyt
 - `npx tsc --noEmit` — typecheck (run after every code change)
 - `npm run lint` — eslint (run after every code change)
 - `npx shadcn@latest add <component>` — add a shadcn component
+- `magick -background none assets/icon.svg -depth 8 assets/icon.png && magick -background none assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico` — regenerate the icons after editing `assets/icon.svg` (the master; never hand-edit the raster)
 - `npm start` — dev run (Vite + Electron window); the developer runs this, ask before launching it yourself
 - `npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result` — build the installable app, then `nix profile install /tmp/magscribe-result` puts MagScribe in the application menu. A later build is a store path of its own, so replace it with `nix profile remove magscribe` first. See `nix/magscribe.nix`
 - On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `nix/electron-libs.nix`
