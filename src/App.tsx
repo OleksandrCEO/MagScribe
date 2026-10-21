@@ -27,7 +27,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Prompts } from '@/prompts';
-import { AboutDialog, SettingsDialog, readPrompts, readSetting, writePrompts, writeSetting } from '@/settings';
+import {
+  AboutDialog,
+  SettingsDialog,
+  StopDialog,
+  readPrompts,
+  readSetting,
+  writePrompts,
+  writeSetting,
+} from '@/settings';
 import { timecode, toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -114,6 +122,7 @@ export default function App() {
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
+  const [confirming, setConfirming] = useState(false); // the stop is one click away from costing the subtitles
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -245,10 +254,8 @@ export default function App() {
   };
 
   /** Stops whatever is running and keeps whatever it has already produced. */
-  const stop = async (): Promise<void> => {
-    // Nothing decoded yet means nothing to lose, so only a run that has produced text asks first.
-    if (covered.current > 0 && !(await window.api.confirmStop())) return;
-
+  const stop = (): void => {
+    setConfirming(false);
     stopped.current = true;
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
     // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
@@ -658,7 +665,8 @@ export default function App() {
                   size="icon-xs"
                   title="Зупинити"
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                  onClick={() => void stop()}
+                  // Nothing decoded yet means nothing to lose, so only a run with text asks first.
+                  onClick={() => (covered.current > 0 ? setConfirming(true) : stop())}
                 >
                   <XIcon className="size-3.5" />
                 </Button>
@@ -889,6 +897,7 @@ export default function App() {
         </TooltipProvider>
       </div>
 
+      <StopDialog open={confirming} onStop={stop} onClose={() => setConfirming(false)} />
       <SettingsDialog
         open={dialog === 'settings'}
         prompts={prompts}

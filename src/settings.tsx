@@ -127,6 +127,31 @@ export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsPr
   );
 }
 
+/** Asked before a stop that costs the subtitles — the one irreversible part of stopping. */
+export function StopDialog({ open, onStop, onClose }: { open: boolean; onStop: () => void; onClose: () => void }) {
+  return (
+    <Modal open={open} title="Зупинити транскрибацію?" onClose={onClose}>
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">
+          <p>Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.</p>
+          <p>
+            Але субтитри <span className="font-medium text-foreground">.srt</span> для цього файлу вже не
+            вийдуть: таймкоди складаються в одне ціле лише наприкінці повного прогону.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="lg" className="px-4" onClick={onClose}>
+            Хай працює
+          </Button>
+          <Button variant="destructive" size="lg" className="px-4" onClick={onStop}>
+            Зупинити
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /** `engine` is the adapter line the status bar shows, or null while the model is still loading. */
 export function AboutDialog({ open, engine, onClose }: { open: boolean; engine: string | null; onClose: () => void }) {
   return (
