@@ -3,6 +3,7 @@ import {
   ArrowLeftIcon,
   AudioLinesIcon,
   CaptionsIcon,
+  ChevronDownIcon,
   ClipboardCopyIcon,
   DownloadIcon,
   FileAudioIcon,
@@ -11,7 +12,6 @@ import {
   MonitorIcon,
   MoonIcon,
   RotateCcwIcon,
-  SettingsIcon,
   SparklesIcon,
   SunIcon,
   UploadIcon,
@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import { MODES, MODE_KEY, SettingsDialog, readSetting, writeSetting, type Mode } from '@/settings';
+import { AboutDialog, MODES, MODE_KEY, SettingsDialog, readSetting, writeSetting, type Mode } from '@/settings';
 import { toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -72,7 +72,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'system'));
   const [mode, setMode] = useState<Mode>(() => readSetting(MODE_KEY, MODE_VALUES, 'transcript'));
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
   const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
@@ -460,20 +460,45 @@ export default function App() {
         </div>
       )}
 
-      <div className="absolute top-5 left-6 flex items-center gap-2.5">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <AudioLinesIcon className="size-4" />
-          <span className="text-[13px] font-medium text-foreground">MagScribe</span>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          title="Налаштування"
-          className="-my-1.5 size-6.5 rounded-[7px] text-muted-foreground"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <SettingsIcon className="size-3.5" />
-        </Button>
+      {/* The name is the menu: one trigger instead of a tool hung on the brand mark. The negative margin keeps
+          the row as tall as the text, so nothing else in the corner moves. */}
+      <button
+        type="button"
+        popoverTarget="app-menu"
+        className={cn(
+          'absolute top-[14px] left-4 flex items-center gap-2 rounded-[9px] px-2 py-1.5',
+          'text-muted-foreground transition-colors hover:bg-muted/60',
+        )}
+      >
+        <AudioLinesIcon className="size-4" />
+        <span className="text-[13px] font-medium text-foreground">MagScribe</span>
+        <ChevronDownIcon className="size-3.5" />
+      </button>
+
+      {/* A native popover: the top layer, Esc and click-outside come from the platform, so there is no JS here. */}
+      <div
+        id="app-menu"
+        popover="auto"
+        className={cn(
+          'fixed top-12 left-4 m-0 w-56 rounded-xl border bg-popover p-1.5 text-popover-foreground',
+          'shadow-[0_18px_48px_-20px_rgb(0_0_0/0.55)]',
+        )}
+      >
+        {([
+          ['settings', 'Налаштування'],
+          ['about', 'Про MagScribe'],
+        ] as const).map(([target, label]) => (
+          <button
+            key={target}
+            type="button"
+            popoverTarget="app-menu"
+            popoverTargetAction="hide"
+            className="flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-muted"
+            onClick={() => setDialog(target)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="absolute top-4 right-5 flex items-center gap-2">
@@ -679,28 +704,39 @@ export default function App() {
           )}
         </div>
 
-        {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill. */}
-        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end pb-1.5 text-xs">
+        {/* Its own group, shaped like the theme switch: still set once per file, but now it reads as a control. */}
+        <div
+          className={cn(
+            'pointer-events-auto mb-1.5 flex items-center gap-0.5 justify-self-end',
+            'rounded-[10px] border bg-background p-[3px]',
+          )}
+        >
           {languages.map(({ value, label, title }) => (
-            <button
+            <Button
               key={label}
-              type="button"
+              variant="ghost"
+              size="xs"
               title={title}
               aria-pressed={language === value}
               disabled={busy}
               className={cn(
-                'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
-                language === value && 'font-medium text-foreground',
+                'h-6.5 rounded-[7px] px-2 text-muted-foreground',
+                language === value && 'bg-muted text-foreground',
               )}
               onClick={() => setLanguage(value)}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      <SettingsDialog open={settingsOpen} mode={mode} onMode={setMode} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog open={dialog === 'settings'} mode={mode} onMode={setMode} onClose={() => setDialog(null)} />
+      <AboutDialog
+        open={dialog === 'about'}
+        engine={model && `${model.adapter} · ${model.encoder}`}
+        onClose={() => setDialog(null)}
+      />
       <Toaster />
     </div>
   );

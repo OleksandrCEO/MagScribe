@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from 'cn';
@@ -32,10 +32,10 @@ export const writeSetting = (key: string, value: string): void => {
   }
 };
 
-type Props = { open: boolean; mode: Mode; onMode: (mode: Mode) => void; onClose: () => void };
+type ModalProps = { open: boolean; title: string; onClose: () => void; children: ReactNode };
 
-/** A native <dialog>: the backdrop, Esc and the focus trap come from the platform instead of from us. */
-export function SettingsDialog({ open, mode, onMode, onClose }: Props) {
+/** The shell both windows share: a native <dialog>, so the backdrop, Esc and the focus trap come from the platform. */
+function Modal({ open, title, onClose, children }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export function SettingsDialog({ open, mode, onMode, onClose }: Props) {
     >
       <div className="flex flex-col gap-5 p-6">
         <div className="flex items-start justify-between gap-4">
-          <h2 className="text-[15px] font-semibold">Налаштування</h2>
+          <h2 className="text-[15px] font-semibold">{title}</h2>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -69,33 +69,65 @@ export function SettingsDialog({ open, mode, onMode, onClose }: Props) {
             <XIcon />
           </Button>
         </div>
-
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] font-medium">Режим за замовчуванням</span>
-            <span className="text-xs text-muted-foreground">
-              Перша кнопка в панелі і екран, яким завершується транскрибація. У панелі режим завжди можна
-              перемкнути на один файл.
-            </span>
-          </div>
-          {MODES.map(({ value, label, hint }) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={mode === value}
-              onClick={() => onMode(value)}
-              className={cn(
-                'flex flex-col gap-0.5 rounded-xl border bg-background px-4 py-3 text-left transition-colors',
-                'hover:bg-muted/60',
-                mode === value && 'border-foreground/35 bg-muted hover:bg-muted',
-              )}
-            >
-              <span className="text-[13.5px] font-medium">{label}</span>
-              <span className="text-xs text-muted-foreground">{hint}</span>
-            </button>
-          ))}
-        </div>
+        {children}
       </div>
     </dialog>
+  );
+}
+
+type SettingsProps = { open: boolean; mode: Mode; onMode: (mode: Mode) => void; onClose: () => void };
+
+export function SettingsDialog({ open, mode, onMode, onClose }: SettingsProps) {
+  return (
+    <Modal open={open} title="Налаштування" onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[13px] font-medium">Режим за замовчуванням</span>
+          <span className="text-xs text-muted-foreground">
+            Перша кнопка в панелі і екран, яким завершується транскрибація. У панелі режим завжди можна
+            перемкнути на один файл.
+          </span>
+        </div>
+        {MODES.map(({ value, label, hint }) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={mode === value}
+            onClick={() => onMode(value)}
+            className={cn(
+              'flex flex-col gap-0.5 rounded-xl border bg-background px-4 py-3 text-left transition-colors',
+              'hover:bg-muted/60',
+              mode === value && 'border-foreground/35 bg-muted hover:bg-muted',
+            )}
+          >
+            <span className="text-[13.5px] font-medium">{label}</span>
+            <span className="text-xs text-muted-foreground">{hint}</span>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/** `engine` is the adapter line the status bar shows, or null while the model is still loading. */
+export function AboutDialog({ open, engine, onClose }: { open: boolean; engine: string | null; onClose: () => void }) {
+  return (
+    <Modal open={open} title="Про MagScribe" onClose={onClose}>
+      <div className="flex flex-col gap-3 text-[13px] leading-[1.6] text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">MagScribe {__APP_VERSION__}</span> — транскрибація відео
+          й аудіо на твоїй машині.
+        </p>
+        <p>
+          Whisper large-v3-turbo рахує тут, локально: ні файл, ні звук нікуди не йдуть
+          {engine && <span className="text-foreground"> ({engine})</span>}. З мережі завантажується лише сама
+          модель, один раз.
+        </p>
+        <p>
+          Виняток — конспект і таймкоди: вони передають транскрипт команді <code>claude</code>, а та звертається
+          до Anthropic.
+        </p>
+      </div>
+    </Modal>
   );
 }
