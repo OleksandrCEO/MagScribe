@@ -345,6 +345,23 @@ export default function App() {
   // settings leads the pill; the other stays one click away for a single file.
   const starts: Mode[] = mode === 'subtitles' ? ['subtitles', 'transcript'] : ['transcript', 'subtitles'];
 
+  // The subtitle chain ends in chapters, so the same button leads there from the transcript and from the .srt.
+  // In subtitles mode it takes the lead slot that the summary holds in text mode.
+  const chaptersButton: ReactNode = chapters ? (
+    <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('chapters')}>
+      <ListOrderedIcon /> Таймкоди
+    </Button>
+  ) : (
+    <Button
+      size="lg"
+      className="rounded-full px-4.5"
+      disabled={!done || segments.length === 0 || aiTask !== null}
+      onClick={() => runAi('chapters')}
+    >
+      <ListOrderedIcon /> {aiTask === 'chapters' ? 'Готую таймкоди…' : 'Таймкоди'}
+    </Button>
+  );
+
   const startButton = (target: Mode, variant: 'default' | 'ghost'): ReactNode => (
     <Button
       key={target}
@@ -559,18 +576,21 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .txt
               </Button>
-              {segments.length > 0 && (
+              {/* Shown from the first second of a subtitles run, so the pill says what this run is for. */}
+              {(view === 'subtitles' || segments.length > 0) && (
                 <Button
                   variant="ghost"
                   size="lg"
                   className="rounded-full px-3.5"
-                  disabled={!done}
+                  disabled={!done || segments.length === 0}
                   onClick={() => setView('subtitles')}
                 >
                   <CaptionsIcon /> Субтитри
                 </Button>
               )}
-              {summary ? (
+              {view === 'subtitles' ? (
+                chaptersButton
+              ) : summary ? (
                 <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('summary')}>
                   <SparklesIcon /> Конспект
                 </Button>
@@ -602,20 +622,7 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .srt
               </Button>
-              {chapters ? (
-                <Button size="lg" className="rounded-full px-4.5" onClick={() => setView('chapters')}>
-                  <ListOrderedIcon /> Таймкоди
-                </Button>
-              ) : (
-                <Button
-                  size="lg"
-                  className="rounded-full px-4.5"
-                  disabled={!done || aiTask !== null}
-                  onClick={() => runAi('chapters')}
-                >
-                  <ListOrderedIcon /> {aiTask === 'chapters' ? 'Готую таймкоди…' : 'Зробити таймкоди'}
-                </Button>
-              )}
+              {chaptersButton}
             </>
           )}
           {screen === 'chapters' && (
