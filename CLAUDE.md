@@ -68,5 +68,11 @@ Local-first desktop app: converts video/audio files and transcribes them. Transc
 
 ## Git
 
-- Claude makes the commits in this project — this overrides the global "never commit" rule. Commit each completed task, not every edit.
+- Claude makes the commits in this project — this overrides the global "never commit" rule.
+- **Commit a group of work, never a single edit.** A commit per tweak is noise the developer does not want to read, and it is the most common thing to get wrong here. When in doubt, wait.
+- Commit when one of these is true, and otherwise do not commit at all — and do not mention it either:
+  - the developer asks for it;
+  - the next request is clearly a different kind of work from what came before — close the previous group first, then start the new one;
+  - a burst of small requests has piled up: group them roughly every five messages so the history stays readable.
 - Commit format: `scope: description` (e.g. `window: restore size and position on launch`).
+- Push only when asked.
