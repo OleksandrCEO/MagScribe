@@ -48,7 +48,7 @@
 
 - **Linux x86_64.** Складання під Windows і macOS налаштоване, але ніколи не перевірялося.
 - **ffmpeg** у `PATH` — застосунок не несе власного бінарника (чому — нижче). У дистрибутивах він є в пакетах:
-  `sudo apt install ffmpeg`, `sudo dnf install ffmpeg`, `nix profile install nixpkgs#ffmpeg`.
+  `sudo apt install ffmpeg`, `sudo dnf install ffmpeg`, `nix profile add nixpkgs#ffmpeg`.
   Без нього коротке відео чи аудіо (до 200 МБ) усе одно розшифрується — файл прочитає декодер самого браузера.
   Перевірено, що так читаються MP4, MOV, MKV, MP3, FLAC; AVI і WMV — ні. Збереження аудіодоріжки в OGG без
   ffmpeg не працює взагалі: кодувати Opus нічим.
@@ -97,7 +97,7 @@ npm start
 Встановити як застосунок у меню (NixOS):
 
 ```bash
-npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result && nix profile install /tmp/magscribe-result
+npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result && nix profile add /tmp/magscribe-result
 ```
 
 Наступна збірка — це інший store path, тому перед повторним встановленням зроби `nix profile remove magscribe`.

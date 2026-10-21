@@ -58,11 +58,11 @@ const config: ForgeConfig = {
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
-      // The app lives on app://; file:// privileges buy it nothing, and an Electron upgrade that adds a fuse
-      // should fail the build instead of quietly shipping it on a default.
+      // The app lives on app://; file:// privileges buy it nothing.
       [FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
-      [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false, // no snapshot of our own to load
-      strictlyRequireAllFuses: true,
+      // `strictlyRequireAllFuses: true` is not an option here: the Electron 44 binary has nine fuses and the
+      // @electron/fuses that forge 7 brings (1.8.0) knows eight, so it fails packaging outright. It would take
+      // @electron/fuses 2.x, i.e. a forge upgrade, to buy one warning on a future Electron bump.
     }),
   ],
 };

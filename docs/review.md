@@ -558,11 +558,17 @@ dev-прогін цього не покаже — після додавання 
 
 ### ✅ 4.13 Fuses і дрібне hardening
 
-> **Зроблено 21.10.2026.** `sandbox: true`, `GrantFileProtocolExtraPrivileges: false`,
-> `strictlyRequireAllFuses: true` (воно вимагає перелічити всі fuses, тому в списку з'явився ще й
-> `LoadBrowserProcessSpecificV8Snapshot: false`), і всі три `on*` у preload повертають свій `off`, який
-> `App.tsx` викликає при розмонтуванні. Нотатка про no-op `EnableEmbeddedAsarIntegrityValidation` на Linux
-> лишається чинною — просто знати.
+> **Зроблено 21.10.2026.** `sandbox: true`, `GrantFileProtocolExtraPrivileges: false`, і всі три `on*` у
+> preload повертають свій `off`, який `App.tsx` викликає при розмонтуванні.
+>
+> **`strictlyRequireAllFuses: true` не вийшло, і це тупик, а не недогляд.** Прапорець вимагає конфіг для
+> кожного fuse у бінарнику; в Electron 44 їх дев'ять, а `@electron/fuses`, який тягне forge 7, знає вісім
+> (`1.8.0`, остання — `2.1.3`). Результат — `npm run package` падає на `setFuseWire` і `out/` лишається
+> порожнім. Ціна «правильного» шляху: бамп `@electron/fuses` до 2.x тягне версію `plugin-fuses`, тобто весь
+> forge, і все це заради одного попередження при майбутньому апгрейді Electron. Не варте того; переглянути,
+> коли forge все одно оновлюватимемо.
+>
+> Нотатка про no-op `EnableEmbeddedAsarIntegrityValidation` на Linux лишається чинною — просто знати.
 
 Набір у `forge.config.ts:52` правильний (`RunAsNode: false` — головне, без нього `ELECTRON_RUN_AS_NODE` робить з
 бінарника звичайний node). Чого бракує:
