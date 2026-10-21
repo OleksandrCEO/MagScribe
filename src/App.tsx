@@ -15,7 +15,6 @@ import {
   RotateCcwIcon,
   SparklesIcon,
   SunIcon,
-  TypeIcon,
   UploadIcon,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -253,8 +252,8 @@ export default function App() {
   };
 
   const copy = async (text: string): Promise<void> => {
-    await window.api.copyText(text);
-    toast.success('Скопійовано');
+    if (await window.api.copyText(text)) toast.success('Скопійовано');
+    else toast.error('Буфер обміну не прийняв текст');
   };
 
   const save = async (saved: Promise<boolean>): Promise<void> => {
@@ -430,7 +429,7 @@ export default function App() {
       disabled={!file || busy || pending || modelStage === 'failed'}
       onClick={() => (model ? void startTranscription() : setPending(true))}
     >
-      <TypeIcon />
+      <AudioLinesIcon />
       <span className={wideOnly}>
         {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
       </span>
@@ -586,14 +585,19 @@ export default function App() {
             )}
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn(
-                'relative h-full overflow-hidden rounded-full bg-foreground transition-[width]',
-                'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r',
-                'after:from-transparent after:via-white/35 after:to-transparent',
-              )}
-              style={{ width: `${job.value ?? 100}%` }}
-            />
+            {job.value === undefined ? (
+              // No percentage to promise: a short bar crossing the track, instead of a full one that looks done.
+              <div className="h-full w-2/5 animate-indeterminate rounded-full bg-foreground" />
+            ) : (
+              <div
+                className={cn(
+                  'relative h-full overflow-hidden rounded-full bg-foreground transition-[width]',
+                  'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r',
+                  'after:from-transparent after:via-white/35 after:to-transparent',
+                )}
+                style={{ width: `${job.value}%` }}
+              />
+            )}
           </div>
         </div>
       )}

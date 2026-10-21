@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   Menu,
   Notification,
   dialog,
@@ -246,6 +247,16 @@ ipcMain.handle('audio:save', async (_event, fromPath: unknown, suggestedName: un
 
   await fs.promises.copyFile(fromPath, target);
   return true;
+});
+
+// The renderer cannot do this itself: its preload is sandboxed, and a sandboxed preload gets only a subset of
+// electron (ipcRenderer, contextBridge, webFrame, webUtils, nativeImage, crashReporter) — no clipboard module.
+ipcMain.handle('clipboard:write', async (_event, text: unknown): Promise<boolean> => {
+  if (typeof text !== 'string') throw new Error('clipboard:write needs text');
+
+  await clipboard.writeText(text); // async since Electron 44, modelled on the W3C API
+  // Read it back: on Wayland the selection belongs to whoever claimed it last, so a write can quietly not stick.
+  return (await clipboard.readText()) === text;
 });
 
 ipcMain.on('theme:set', (_event, theme: unknown) => {

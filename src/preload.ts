@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export type SelectedFile = { path: string; name: string; size: number };
 export type ExportedAudio = { path: string; size: number }; // an OGG/Opus file in the temp folder, see audio.ts
@@ -24,7 +24,8 @@ const api = {
     ipcRenderer.invoke('file:save', text, suggestedName),
   saveAudio: (fromPath: string, suggestedName: string): Promise<boolean> =>
     ipcRenderer.invoke('audio:save', fromPath, suggestedName),
-  copyText: (text: string): Promise<void> => clipboard.writeText(text),
+  // Resolves false when the clipboard refused the text; the window says so instead of a false «Скопійовано».
+  copyText: (text: string): Promise<boolean> => ipcRenderer.invoke('clipboard:write', text),
   // Lets main keep the machine awake and ask before the window closes mid-run.
   setWorking: (working: boolean): void => ipcRenderer.send('work:working', working),
   // Main flips nativeTheme, so prefers-color-scheme (and with it the whole CSS theme) follows the choice.
