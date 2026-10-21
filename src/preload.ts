@@ -10,7 +10,9 @@ const api = {
   // Modern Electron strips File.path; this is the only way to learn where a dropped file lives.
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   // Transcription itself runs in a renderer worker; main only turns media into samples it can chew on.
-  extractAudio: (filePath: string): Promise<Float32Array> => ipcRenderer.invoke('audio:extract', filePath),
+  // `from` lets a stopped run resume: ffmpeg seeks there and decodes only what is left.
+  extractAudio: (filePath: string, from?: number): Promise<Float32Array> =>
+    ipcRenderer.invoke('audio:extract', filePath, from),
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
   // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
   cancelAudio: (): void => ipcRenderer.send('audio:cancel'),

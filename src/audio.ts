@@ -35,7 +35,12 @@ export const cancelFfmpeg = (): void => {
   running?.kill('SIGKILL');
 };
 
-const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buffer) => void): Promise<void> =>
+const runFfmpeg = (
+  args: string[],
+  onProgress?: OnProgress,
+  onData?: (chunk: Buffer) => void,
+  skip = 0, // seconds seeked past before decoding, so the percentage counts what is left and not the whole file
+): Promise<void> =>
   new Promise((resolve, reject) => {
     const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'info', '-nostats', '-progress', 'pipe:2', ...args]);
     running = ffmpeg;
@@ -51,7 +56,10 @@ const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buf
         const clock = /^\s*Duration: (\d+:\d\d:\d\d\.\d+)/.exec(line);
         const time = /^out_time_us=(\d+)/.exec(line);
         if (clock) duration = parseClock(clock[1]);
-        else if (time) onProgress?.(duration > 0 ? Math.min(100, Number(time[1]) / 1e6 / duration * 100) : 0);
+        else if (time) {
+          const span = duration - skip;
+          onProgress?.(span > 0 ? Math.min(100, Number(time[1]) / 1e6 / span * 100) : 0);
+        }
         else if (!/^\w+=/.test(line)) errorOutput = `${errorOutput}${line}\n`.slice(-2000); // keep the tail
       }
     });
@@ -70,14 +78,17 @@ const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buf
  * ffmpeg writes raw `f32le` to stdout — the exact byte layout of a Float32Array, i.e. WAV without the
  * 44-byte header we would have to strip again anyway.
  */
-export const extractAudio = async (filePath: string, onProgress?: OnProgress): Promise<Float32Array> => {
+export const extractAudio = async (filePath: string, onProgress?: OnProgress, from = 0): Promise<Float32Array> => {
   // ponytail: the whole track is buffered in RAM (~230 MB per hour); stream it to disk if long files start to hurt
   const chunks: Buffer[] = [];
-  // -vn: video streams would only slow the decode down
+  // -vn: video streams would only slow the decode down. -ss ahead of -i seeks on the input, which is the fast one,
+  // and is how a resumed run decodes only the part it still needs.
   await runFfmpeg(
-    ['-i', filePath, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 'f32le', 'pipe:1'],
+    [...(from > 0 ? ['-ss', String(from)] : []), '-i', filePath, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE),
+      '-f', 'f32le', 'pipe:1'],
     onProgress,
     (chunk) => chunks.push(chunk),
+    from,
   );
 
   const pcm = Buffer.concat(chunks);

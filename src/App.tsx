@@ -12,6 +12,7 @@ import {
   ListOrderedIcon,
   MonitorIcon,
   MoonIcon,
+  PlayIcon,
   RotateCcwIcon,
   SparklesIcon,
   SunIcon,
@@ -27,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Prompts } from '@/prompts';
 import { AboutDialog, SettingsDialog, readPrompts, readSetting, writePrompts, writeSetting } from '@/settings';
-import { toSrt, toTimedText } from '@/subtitles';
+import { timecode, toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
@@ -112,6 +113,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
+  const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -119,6 +121,11 @@ export default function App() {
   const ready = useRef(false); // read inside the worker listener, which never sees state updates
   const startedAt = useRef(0);
   const stopped = useRef(false); // a cancelled ffmpeg rejects like a broken one; this tells the two apart
+  const covered = useRef(0); // seconds of audio the text already reaches, counted from the start of the file
+  const offset = useRef(0); // where the current run started; a resumed worker counts from its own zero
+  const kept = useRef(''); // the text a resumed run appends to
+  const resumed = useRef(false); // a resumed run has no timestamps for the part before it, so it offers no .srt
+  const pendingFrom = useRef<number | undefined>(undefined); // what the click asked for while the model loaded
 
   // Spawned on mount, and again after a stop: terminating is the only way out of a run, and it takes the
   // loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
@@ -138,17 +145,23 @@ export default function App() {
         ready.current = true;
       }
       if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
-      if (message.type === 'progress') setProgress(message.progress);
+      if (message.type === 'progress') {
+        setProgress(message.progress);
+        covered.current = offset.current + message.covered;
+      }
       if (message.type === 'merging') setMerging(true);
-      if (message.type === 'partial') setTranscript(message.text);
+      if (message.type === 'partial') setTranscript(kept.current + message.text);
       if (message.type === 'result') {
+        const whole = kept.current + message.text;
         setMerging(false);
-        setTranscript(message.text);
-        setSegments(message.segments);
-        setSubtitles(toSrt(message.segments));
+        setTranscript(whole);
+        // A resumed run only has timestamps for the part it did, and half an .srt is worse than none.
+        setSegments(resumed.current ? [] : message.segments);
+        setSubtitles(resumed.current ? '' : toSrt(message.segments));
+        setResumeAt(null);
         setProgress(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-        window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(message.text)} слів`);
+        window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(whole)} слів`);
       }
       if (message.type === 'error') {
         // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
@@ -188,15 +201,18 @@ export default function App() {
     setDragging(false);
   };
 
-  const clearResults = (): void => {
-    setTranscript('');
+  const clearResults = (keepText = false): void => {
+    if (!keepText) {
+      setTranscript('');
+      setElapsed(null);
+      setAudio(null);
+      setResumeAt(null);
+    }
     setSegments([]);
     setSubtitles('');
     setSummary('');
     setChapters('');
     setView('transcript');
-    setElapsed(null);
-    setAudio(null);
   };
 
   const pickFile = (picked: SelectedFile): void => {
@@ -236,20 +252,30 @@ export default function App() {
     workerRef.current?.terminate();
     spawnWorker();
 
+    // Where the text got to: the run can pick up there instead of starting the file over.
+    const reached = covered.current;
+    setResumeAt(reached > 0 ? reached : null);
     setConverting(false);
     setExporting(false);
     setProgress(null);
     setMerging(false);
-    toast.info(transcript ? 'Зупинено — розшифроване досі лишилось' : 'Зупинено');
+    toast.info(reached > 0 ? `Зупинено на ${timecode(reached)} — можна продовжити` : 'Зупинено');
   };
 
   const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
   const extension = file?.name.split('.').pop() ?? '';
 
-  const startTranscription = async (): Promise<void> => {
+  /** `from` resumes a stopped run at that second of the file, keeping the text it already produced. */
+  const startTranscription = async (from?: number): Promise<void> => {
     if (!file || !workerRef.current) return;
 
-    clearResults();
+    const resuming = from !== undefined && from > 0;
+    clearResults(resuming);
+    kept.current = resuming ? `${transcript.trimEnd()} ` : '';
+    resumed.current = resuming;
+    offset.current = from ?? 0;
+    covered.current = offset.current;
+
     stopped.current = false;
     setPending(false);
     setMerging(false);
@@ -257,7 +283,7 @@ export default function App() {
     setConverting(true);
     startedAt.current = Date.now();
     try {
-      const samples = await window.api.extractAudio(file.path);
+      const samples = await window.api.extractAudio(file.path, from);
       setProgress(0);
       workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
@@ -324,7 +350,7 @@ export default function App() {
   useEffect(() => {
     if (!pending || model === null || busy) return;
     setPending(false);
-    void startTranscription();
+    void startTranscription(pendingFrom.current);
   }, [pending, model, busy]);
 
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
@@ -462,7 +488,11 @@ export default function App() {
       className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
       title="Транскрибувати"
       disabled={!file || busy || pending || modelStage === 'failed'}
-      onClick={() => (model ? void startTranscription() : setPending(true))}
+      onClick={() => {
+        pendingFrom.current = undefined;
+        if (model) void startTranscription();
+        else setPending(true);
+      }}
     >
       <AudioLinesIcon />
       <span className={wideOnly}>
@@ -719,6 +749,22 @@ export default function App() {
               >
                 <DownloadIcon /> <span className={wideOnly}>{onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}</span>
               </Button>
+              {resumeAt !== null && (
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  className="rounded-full px-3.5"
+                  title={`Продовжити з ${timecode(resumeAt)}`}
+                  disabled={!file || busy || pending || modelStage === 'failed'}
+                  onClick={() => {
+                    pendingFrom.current = resumeAt;
+                    if (model) void startTranscription(resumeAt);
+                    else setPending(true);
+                  }}
+                >
+                  <PlayIcon /> <span className={wideOnly}>Продовжити з {timecode(resumeAt)}</span>
+                </Button>
+              )}
               {segments.length > 0 && (
                 <Button
                   variant="ghost"

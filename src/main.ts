@@ -201,8 +201,13 @@ const requirePath = (value: unknown, channel: string): string => {
 };
 
 // Both conversions stream their percentage back to the window that asked for them.
-ipcMain.handle('audio:extract', (event, filePath: unknown): Promise<Float32Array> =>
-  extractAudio(requirePath(filePath, 'audio:extract'), (percent) => event.sender.send('audio:progress', percent)),
+ipcMain.handle('audio:extract', (event, filePath: unknown, from: unknown): Promise<Float32Array> =>
+  extractAudio(
+    requirePath(filePath, 'audio:extract'),
+    (percent) => event.sender.send('audio:progress', percent),
+    // Where a resumed run picks up; anything that is not a sane number decodes the file from its start.
+    typeof from === 'number' && Number.isFinite(from) && from > 0 ? from : 0,
+  ),
 );
 
 ipcMain.handle('audio:export', (event, filePath: unknown): Promise<ExportedAudio> =>

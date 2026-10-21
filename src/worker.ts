@@ -11,6 +11,7 @@ const MODEL_ID = 'onnx-community/whisper-large-v3-turbo';
 const SAMPLE_RATE = 16_000;
 const CHUNK_LENGTH_S = 30;
 const STRIDE_LENGTH_S = 5;
+const JUMP_S = CHUNK_LENGTH_S - 2 * STRIDE_LENGTH_S; // new audio each chunk adds; the rest overlaps its neighbours
 
 export type Device = 'webgpu' | 'wasm';
 
@@ -26,7 +27,8 @@ export type WorkerResponse =
   | { type: 'download'; progress: number } // model download, 0..100
   | { type: 'fallback'; from: Device; reason: string }
   | { type: 'ready'; adapter: string; encoder: string } // what the model really runs on, for the status line
-  | { type: 'progress'; progress: number } // transcription, 0..100
+  // `covered` is how far into the audio the text already reaches, in seconds — where a stopped run resumes.
+  | { type: 'progress'; progress: number; covered: number }
   | { type: 'merging' } // chunks done; the pipeline is still stitching overlaps and timestamps
   | { type: 'partial'; text: string } // text so far, so the first chunk is not a silent wait
   | { type: 'result'; text: string; segments: Segment[] }
@@ -110,16 +112,20 @@ const load = async (): Promise<void> => {
 const transcribe = async (audio: Float32Array, language: Language): Promise<void> => {
   if (!transcriber) throw new Error('Модель ще не завантажена');
 
-  // Same window arithmetic the pipeline uses internally, so the percentage matches the real chunk count.
-  const window = CHUNK_LENGTH_S * SAMPLE_RATE;
-  const jump = (CHUNK_LENGTH_S - 2 * STRIDE_LENGTH_S) * SAMPLE_RATE;
-  const totalChunks = audio.length > window ? Math.ceil((audio.length - window) / jump) + 1 : 1;
-  let finished = 0;
+  const duration = audio.length / SAMPLE_RATE;
 
   // The pipeline types its tokenizer as the generic base class; for whisper it really is a WhisperTokenizer.
   const tokenizer = transcriber.tokenizer as ConstructorParameters<typeof WhisperTextStreamer>[0];
 
   let text = '';
+
+  // Counting generate() calls would be wrong here. With return_timestamps the model takes the seek path
+  // (`_generate_with_seek`): when it stops short inside a 30-second window it re-encodes the remainder and
+  // generates again, so one window costs one call or several, and the count runs ahead of the audio.
+  // What every pass does report is the timestamp it stopped at, i.e. how much of its segment it ate. Those add
+  // up to the whole window, and consecutive windows overlap, so JUMP/WINDOW turns eaten audio into new audio.
+  let consumed = 0; // seconds of audio the passes have chewed through, counting each window whole
+  let lastEnd = 0; // the last timestamp inside the pass that is running
 
   const streamer = new WhisperTextStreamer(tokenizer, {
     // Chunks take a while, so stream the words out as they are decoded instead of waiting for the chunk.
@@ -127,13 +133,19 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
       text += piece;
       post({ type: 'partial', text });
     },
-    // end() runs once per generate() call, and the pipeline calls generate() once per audio chunk
+    on_chunk_end: (time: number) => {
+      lastEnd = time;
+    },
+    // end() runs once per generate() call — one or more of them per 30-second window.
     on_finalize: () => {
-      finished += 1;
-      post({ type: 'progress', progress: Math.min(100, (finished / totalChunks) * 100) });
-      // The last chunk is not the end: decode_asr still has to resolve the overlaps between every pair of
-      // chunks and turn the timestamp tokens into spans. Nothing reports from in there, so say so here.
-      if (finished >= totalChunks) post({ type: 'merging' });
+      consumed += lastEnd || CHUNK_LENGTH_S; // a pass that emitted no timestamp swallowed its whole segment
+      lastEnd = 0;
+
+      const covered = duration > 0 ? Math.min(duration, consumed * (JUMP_S / CHUNK_LENGTH_S)) : 0;
+      post({ type: 'progress', progress: duration > 0 ? (covered / duration) * 100 : 100, covered });
+      // Reaching the end of the audio is not the end of the run: decode_asr still has to resolve the overlap
+      // between every pair of windows and turn timestamp tokens into spans. Nothing reports from in there.
+      if (covered >= duration) post({ type: 'merging' });
     },
   });
 

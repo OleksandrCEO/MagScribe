@@ -1,33 +1,43 @@
 /**
  * The instructions the local `claude` CLI gets. They live apart from `summary.ts` because the settings window
  * shows them for editing, and the renderer cannot import a module that pulls in node:child_process.
+ *
+ * They are written in English on purpose: the interface may be translated one day, and the answer must follow the
+ * recording, not the instruction. Hence the rule about the source language in both of them — keep it in any edit.
  */
 
 export type AiTask = 'summary' | 'chapters';
 
 export const SUMMARY_PROMPT = [
-  'Нижче транскрипт відео або аудіо. Зроби стислий конспект українською мовою у такому вигляді:',
+  'Below is a transcript of a video or an audio recording.',
+  'Summarise it in the language the transcript itself is written in — never in the language of these instructions.',
   '',
-  '1. Одне речення про те, про що це загалом.',
-  '2. Ключові тези списком — по суті, без води.',
-  '3. Якщо в тексті є домовленості, задачі чи наступні кроки — окремим списком «Далі:».',
+  'Shape of the answer:',
+  '1. One sentence on what this is about as a whole.',
+  '2. The key points as a list — substance only, no filler.',
+  '3. If the text holds agreements, tasks or next steps, add them as a separate list under a short heading of',
+  '   its own, written in the same language as the rest.',
   '',
-  'Спирайся лише на текст, нічого не додумуй. Без преамбул на кшталт «ось конспект».',
+  'Rely on the text alone and invent nothing. No preamble such as "here is the summary".',
 ].join('\n');
 
-// The transcript arrives as `[таймкод] речення` lines, one per subtitle.
+// The transcript arrives as `[timecode] sentence` lines, one per subtitle.
 export const CHAPTERS_PROMPT = [
-  'Нижче транскрипт відео, де кожен рядок починається з таймкоду.',
-  'Склади з нього список розділів українською мовою — по рядку на розділ, у форматі «00:00 - Назва».',
+  'Below is a transcript of a video where every line starts with a timecode.',
+  'Turn it into a list of chapters: one line each, formatted "00:00 - Title".',
+  'Write the titles in the language the transcript itself is written in — never in the language of these',
+  'instructions.',
   '',
-  'Правила:',
-  '- Один розділ — одна справжня зміна теми, у середньому кожні 3–7 хвилин.',
-  '- Назва коротка, до 70 символів, без крапки в кінці: вона має вміститися в один рядок повідомлення.',
-  '- Таймкод бери з рядка, де тема починається, і пиши його в тому ж форматі, що у транскрипті.',
-  '- Перший розділ завжди 00:00 — інакше YouTube не покаже розділи взагалі.',
-  '- Розділи в порядку зростання таймкоду, без повторів.',
+  'Rules:',
+  '- One chapter per real change of subject, on average one every 3 to 30 minutes. Chapters are signposts, not',
+  '  an outline of every paragraph: when in doubt, make fewer of them.',
+  '- Keep a title short, under 70 characters, with no full stop at the end — it has to fit on one line of a',
+  '  chat message.',
+  '- Take the timecode from the line where the subject starts, and keep the format used in the transcript.',
+  '- The first chapter is always 00:00 — without it YouTube shows no chapters at all.',
+  '- Chapters in ascending order of timecode, no repeats.',
   '',
-  'Спирайся лише на текст, нічого не додумуй. Нічого, крім самого списку: без преамбул і пояснень.',
+  'Rely on the text alone and invent nothing. Output nothing but the list itself: no preamble, no explanations.',
 ].join('\n');
 
 export type Prompts = Record<AiTask, string>;
