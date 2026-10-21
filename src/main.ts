@@ -17,7 +17,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
-import { discardExport, exportAudio, extractAudio, isExport } from './audio';
+import { cancelFfmpeg, discardExport, exportAudio, extractAudio, isExport } from './audio';
 import { AI_TASKS, type AiTask } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
@@ -264,6 +264,9 @@ ipcMain.on('theme:set', (_event, theme: unknown) => {
   nativeTheme.themeSource = theme;
   mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff');
 });
+
+// Stopping a run: the renderer kills its own worker, main kills the conversion it may be sitting in.
+ipcMain.on('audio:cancel', cancelFfmpeg);
 
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
 

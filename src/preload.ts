@@ -12,6 +12,8 @@ const api = {
   // Transcription itself runs in a renderer worker; main only turns media into samples it can chew on.
   extractAudio: (filePath: string): Promise<Float32Array> => ipcRenderer.invoke('audio:extract', filePath),
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
+  // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
+  cancelAudio: (): void => ipcRenderer.send('audio:cancel'),
   // Percentage of the extract/export ffmpeg is currently running.
   onAudioProgress: (listener: (percent: number) => void): void => {
     ipcRenderer.on('audio:progress', (_event, percent: unknown) => listener(Number(percent)));

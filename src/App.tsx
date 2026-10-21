@@ -16,6 +16,7 @@ import {
   SparklesIcon,
   SunIcon,
   UploadIcon,
+  XIcon,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { toast } from 'sonner';
@@ -115,10 +116,16 @@ export default function App() {
   const workerRef = useRef<Worker | null>(null);
   const ready = useRef(false); // read inside the worker listener, which never sees state updates
   const startedAt = useRef(0);
+  const stopped = useRef(false); // a cancelled ffmpeg rejects like a broken one; this tells the two apart
 
-  useEffect(() => {
+  // Spawned on mount, and again after a stop: terminating is the only way out of a run, and it takes the
+  // loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
+  const spawnWorker = (): void => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     workerRef.current = worker;
+    ready.current = false;
+    setModel(null);
+    setDownload(0);
 
     worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       const message = event.data;
@@ -150,14 +157,19 @@ export default function App() {
       }
     });
 
+    worker.postMessage({ type: 'load' } satisfies WorkerRequest);
+  };
+
+  useEffect(() => {
+    spawnWorker();
+
     window.api.onAudioProgress(setConversion);
     window.api.onGpuGone((message) => {
       setModelError(`${message}. Перезапусти застосунок.`);
       setProgress(null);
     });
 
-    worker.postMessage({ type: 'load' } satisfies WorkerRequest);
-    return () => worker.terminate();
+    return () => workerRef.current?.terminate();
   }, []);
 
   useEffect(() => {
@@ -212,6 +224,21 @@ export default function App() {
     toast.error(error instanceof Error ? error.message : String(error));
   };
 
+  /** Stops whatever is running and keeps whatever it has already produced. */
+  const stop = (): void => {
+    stopped.current = true;
+    window.api.cancelAudio(); // kills ffmpeg if we are still converting
+    // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
+    workerRef.current?.terminate();
+    spawnWorker();
+
+    setConverting(false);
+    setExporting(false);
+    setProgress(null);
+    setMerging(false);
+    toast.info(transcript ? 'Зупинено — розшифроване досі лишилось' : 'Зупинено');
+  };
+
   const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
   const extension = file?.name.split('.').pop() ?? '';
 
@@ -219,6 +246,7 @@ export default function App() {
     if (!file || !workerRef.current) return;
 
     clearResults();
+    stopped.current = false;
     setPending(false);
     setMerging(false);
     setConversion(0);
@@ -229,7 +257,7 @@ export default function App() {
       setProgress(0);
       workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
-      failWith(error);
+      if (!stopped.current) failWith(error); // a killed ffmpeg rejects like a broken one
       setProgress(null);
     } finally {
       setConverting(false);
@@ -240,12 +268,13 @@ export default function App() {
     if (!file) return;
 
     clearResults();
+    stopped.current = false;
     setConversion(0);
     setExporting(true);
     try {
       setAudio(await window.api.exportAudio(file.path));
     } catch (error) {
-      failWith(error);
+      if (!stopped.current) failWith(error);
     } finally {
       setExporting(false);
     }
@@ -578,11 +607,24 @@ export default function App() {
 
       {job && (
         <div className="absolute bottom-23 left-1/2 flex w-110 max-w-[calc(100%-3rem)] -translate-x-1/2 flex-col gap-2">
-          <div className="flex justify-between gap-4 text-[12.5px] text-muted-foreground">
+          <div className="flex items-center justify-between gap-4 text-[12.5px] text-muted-foreground">
             <span>{job.label}</span>
-            {job.value !== undefined && (
-              <b className="font-medium text-foreground tabular-nums">{Math.round(job.value)} %</b>
-            )}
+            <div className="flex items-center gap-2.5">
+              {job.value !== undefined && (
+                <b className="font-medium text-foreground tabular-nums">{Math.round(job.value)} %</b>
+              )}
+              {busy && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  title="Зупинити"
+                  className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                  onClick={stop}
+                >
+                  <XIcon className="size-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
             {job.value === undefined ? (

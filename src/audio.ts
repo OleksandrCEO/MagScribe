@@ -27,9 +27,18 @@ const parseClock = (clock: string): number => {
  * Progress rides on stderr: the input banner carries `Duration:` and `-progress pipe:2` adds `out_time_us=` lines
  * every half second, which together make a percentage. `-nostats` keeps the human-readable ticker out of it.
  */
+// The window never starts two conversions at once, so one handle is all it takes to stop the current run.
+let running: ReturnType<typeof spawn> | null = null;
+
+/** Kills the ffmpeg behind an extract or an export; the pending promise then rejects on its own. */
+export const cancelFfmpeg = (): void => {
+  running?.kill('SIGKILL');
+};
+
 const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buffer) => void): Promise<void> =>
   new Promise((resolve, reject) => {
     const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'info', '-nostats', '-progress', 'pipe:2', ...args]);
+    running = ffmpeg;
     let errorOutput = '';
     let pendingLine = '';
     let duration = 0;
@@ -49,6 +58,7 @@ const runFfmpeg = (args: string[], onProgress?: OnProgress, onData?: (chunk: Buf
 
     ffmpeg.on('error', reject); // binary missing or not executable
     ffmpeg.on('close', (code) => {
+      running = null;
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg failed with code ${code}: ${errorOutput.trim() || 'no error output'}`));
     });
