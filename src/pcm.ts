@@ -4,13 +4,30 @@
  * One definition of the sample rate for all three sides: main decodes with ffmpeg, the worker consumes the
  * samples, and the window falls back to the browser's own decoder when the machine has no ffmpeg.
  */
-import { t } from './i18n';
+// The extension is for node: `npm test` runs this module directly, and its type stripping resolves no
+// extensionless paths. The bundlers do not care either way — see src/pcm.test.ts.
+import { t } from './i18n.ts';
 
 export const SAMPLE_RATE = 16_000;
 
 // Chromium decodes the whole file into memory before anything is resampled, so this route is for short clips.
 // ffmpeg streams and stays the primary one; main refuses to read anything bigger than this for it.
 export const MAX_BROWSER_DECODE = 200 * 1024 * 1024;
+
+/** Bytes a second of decoded audio takes: 16 000 samples of four bytes, about 230 MB per hour. */
+export const BYTES_PER_SECOND = SAMPLE_RATE * Float32Array.BYTES_PER_ELEMENT;
+
+/**
+ * Whether a recording of this length can be decoded without running the machine out of memory.
+ *
+ * The samples exist twice at the same moment: the buffer main decodes into, and the structured clone the
+ * window receives before it transfers them on to the worker. Half of what is free is the share this one job
+ * may take — the rest is the model, the browser and whatever else the person is doing. A machine with plenty
+ * of memory never meets this; a 4 GB one with a three-hour file does, and it should hear so before it spends
+ * ten minutes decoding into a crash.
+ */
+export const fitsInMemory = (seconds: number, freeBytes: number): boolean =>
+  seconds * BYTES_PER_SECOND * 2 < freeBytes * 0.5;
 
 /**
  * Decodes a media file into 16 kHz mono samples using the browser's own decoder.

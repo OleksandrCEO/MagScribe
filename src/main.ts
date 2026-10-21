@@ -39,6 +39,10 @@ if (process.platform === 'linux') {
 // DawnWebGPUCache and Whisper builds hundreds of them at ~20 KB each, so the cache kept evicting itself and
 // every cold start recompiled all shaders: minutes at 0 % with the GPU process on five cores. 512 MB holds the set.
 app.commandLine.appendSwitch('gpu-disk-cache-size-kb', String(512 * 1024));
+// The weights live in Cache Storage, and Chromium's network cache was quietly keeping a second copy of the same
+// download — 426 MB of it, measured next to the 727 MB that is the model itself. Nothing here needs a big HTTP
+// cache: the model is fetched once and read from Cache Storage ever after.
+app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
 
 // Chromium refuses CacheStorage on file://, and @huggingface/transformers treats that as "no cache available"
 // and re-downloads the model — the packaged app pulled the whole Whisper checkpoint from HuggingFace on every

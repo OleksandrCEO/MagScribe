@@ -224,6 +224,9 @@ const uk = {
     ffmpegMissing: 'Не знайдено ffmpeg. Встанови його — без нього не вийде ні прочитати звук, ні зберегти аудіо.',
     ffmpegBusy: 'Конвертація вже триває',
     noAudioTrack: 'У файлі немає звукової доріжки',
+    tooLongForMemory: (need: string, free: string) =>
+      `Запис задовгий для вільної памʼяті: розшифровка потребує ~${need} ГБ, а вільно ~${free} ГБ. `
+      + 'Розріжте файл на частини й розшифруйте кожну окремо — або звільніть памʼять і спробуйте ще раз.',
     claudeMissing: 'Команду claude не знайдено. Встанови Claude Code CLI і перевір, що вона є у PATH.',
     claudeTooBig: 'Відповідь claude не вмістилася у 8 МБ',
     claudeTimeout: (seconds: number): string => `claude не вклався у ${seconds} секунд`,
@@ -426,6 +429,9 @@ const en: typeof uk = {
     ffmpegMissing: 'ffmpeg was not found. Install it — without it the sound cannot be read, nor the audio saved.',
     ffmpegBusy: 'A conversion is already running',
     noAudioTrack: 'The file has no audio track',
+    tooLongForMemory: (need: string, free: string) =>
+      `The recording is too long for the free memory: transcribing it needs ~${need} GB and ~${free} GB is `
+      + 'free. Split the file and transcribe the parts, or free some memory and try again.',
     claudeMissing: 'The claude command was not found. Install the Claude Code CLI and check that it is on PATH.',
     claudeTooBig: 'The answer from claude did not fit into 8 MB',
     claudeTimeout: (seconds: number): string => `claude did not finish within ${seconds} seconds`,

@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ExportedAudio } from './preload';
 import { t } from './i18n';
-import { SAMPLE_RATE } from './pcm';
+import { BYTES_PER_SECOND, fitsInMemory, SAMPLE_RATE } from './pcm';
 import { parseClock } from './subtitles';
 
 const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
@@ -61,6 +62,9 @@ const runFfmpeg = (
   onProgress?: OnProgress,
   onData?: (chunk: Buffer) => void,
   skip = 0, // seconds seeked past before decoding, so the percentage counts what is left and not the whole file
+  // Called once, as soon as ffmpeg prints the length of the input. Returning a message aborts the run with it:
+  // this is where a decode too big for the machine is turned down, before any of it is in memory.
+  onDuration?: (seconds: number) => string | null,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const binary = ffmpegBinary();
@@ -88,7 +92,15 @@ const runFfmpeg = (
       for (const line of lines) {
         const clock = /^\s*Duration: (\d+:\d\d:\d\d\.\d+)/.exec(line);
         const time = /^out_time_us=(\d+)/.exec(line);
-        if (clock) duration = parseClock(clock[1]);
+        if (clock) {
+          duration = parseClock(clock[1]);
+          const refusal = onDuration?.(duration);
+          if (refusal) {
+            ffmpeg.kill(); // `close` clears the slot; rejecting twice is a no-op
+            reject(new Error(refusal));
+            return;
+          }
+        }
         else if (time) {
           const span = duration - skip;
           onProgress?.(span > 0 ? Math.min(100, Number(time[1]) / 1e6 / span * 100) : 0);
@@ -114,6 +126,8 @@ const runFfmpeg = (
  * ffmpeg writes raw `f32le` to stdout — the exact byte layout of a Float32Array, i.e. WAV without the
  * 44-byte header we would have to strip again anyway.
  */
+const gb = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1);
+
 export const extractAudio = async (filePath: string, onProgress?: OnProgress, from = 0): Promise<Float32Array> => {
   // ponytail: the whole track is buffered in RAM (~230 MB per hour); stream it to disk if long files start to hurt
   const chunks: Buffer[] = [];
@@ -127,6 +141,13 @@ export const extractAudio = async (filePath: string, onProgress?: OnProgress, fr
     onProgress,
     (chunk) => chunks.push(chunk),
     from,
+    // ffmpeg reports the length of the whole file even when seeking past part of it, so a resumed run is
+    // measured by what is actually left to decode.
+    (seconds) => {
+      const left = Math.max(0, seconds - from);
+      if (fitsInMemory(left, os.freemem())) return null;
+      return t().error.tooLongForMemory(gb(left * BYTES_PER_SECOND * 2), gb(os.freemem()));
+    },
   );
 
   const pcm = Buffer.concat(chunks);
