@@ -211,17 +211,50 @@ ipcMain.handle('audio:export', (event, filePath: unknown): Promise<ExportedAudio
   exportAudio(requirePath(filePath, 'audio:export'), (percent) => event.sender.send('audio:progress', percent)),
 );
 
-/** Save dialog; null when the user cancels. */
+// Where the last save went. Without it every dialog opens in ~/Downloads, however many times in a row the
+// person has picked another folder.
+const saveDirFile = (): string => path.join(app.getPath('userData'), 'save-dir.txt');
+let saveDir: string | null | undefined; // undefined: not read from disk yet
+
+const readSaveDir = (): string | null => {
+  if (saveDir !== undefined) return saveDir;
+
+  try {
+    const saved = fs.readFileSync(saveDirFile(), 'utf-8').trim();
+    // The folder may have been renamed or removed since; the dialog then falls back to the system's choice.
+    saveDir = saved !== '' && path.isAbsolute(saved) && fs.statSync(saved).isDirectory() ? saved : null;
+  } catch {
+    saveDir = null;
+  }
+  return saveDir;
+};
+
+const rememberSaveDir = (target: string): void => {
+  saveDir = path.dirname(target);
+  try {
+    fs.writeFileSync(saveDirFile(), saveDir, 'utf-8');
+  } catch {
+    // losing it only costs the next dialog its starting folder
+  }
+};
+
+/** Save dialog; null when the user cancels. It opens where the last save landed. */
 const askWhereToSave = async (
   suggestedName: unknown,
   fallback: string,
   filter: Electron.FileFilter,
 ): Promise<string | null> => {
+  const name = typeof suggestedName === 'string' ? suggestedName : fallback;
+  const directory = readSaveDir();
+
   const { canceled, filePath } = await dialog.showSaveDialog({
-    defaultPath: typeof suggestedName === 'string' ? suggestedName : fallback,
+    defaultPath: directory === null ? name : path.join(directory, name),
     filters: [filter],
   });
-  return canceled || !filePath ? null : filePath;
+  if (canceled || !filePath) return null;
+
+  rememberSaveDir(filePath);
+  return filePath;
 };
 
 ipcMain.handle('file:save', async (_event, text: unknown, suggestedName: unknown): Promise<boolean> => {
