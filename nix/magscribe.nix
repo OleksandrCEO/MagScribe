@@ -79,9 +79,14 @@ pkgs.stdenv.mkDerivation {
     makeWrapper $out/lib/magscribe/transcriber $out/bin/magscribe \
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
       --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]} \
+      --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.systemd ]} \
       --add-flags "--force-device-scale-factor=1"
   '';
 
+  # systemd is a suffix, not a prefix: the session's own systemd-inhibit wins, and this is only the fallback
+  # for a launcher that starts the app with a bare PATH. main.ts holds a logind inhibitor through it for as
+  # long as a run lasts, because Chromium's own blocker inhibits nothing on Wayland without a focused window.
+  #
   # PATH above is how the app finds ffmpeg: it ships none of its own, because the prebuilt static builds are
   # GPLv3 and conveying one would oblige us to publish matching sources for every library inside it — for
   # encoders this app never calls. nixpkgs' ffmpeg is the user's own copy, so nothing is conveyed.

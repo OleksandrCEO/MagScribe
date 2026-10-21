@@ -13,6 +13,7 @@ import {
   screen,
   shell,
 } from 'electron';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -106,6 +107,42 @@ let mainWindow: BrowserWindow | null = null;
 let working = false;
 let closing = false; // a close was asked for and the window is showing its own question
 let sleepBlocker: number | null = null;
+let inhibitor: ChildProcess | null = null;
+
+/**
+ * Keeping the machine awake on Linux, because Chromium's own blocker does not.
+ *
+ * Measured on KDE/Wayland: `powerSaveBlocker.start()` answers with an id and `isStarted()` says true, while
+ * nothing at all is registered — Chromium's Wayland backend hangs the inhibitor off the *focused* surface
+ * (`zwp_idle_inhibit_manager`, which logs «Cannot inhibit going idle when no window is focused» and carries
+ * on). An hour-long transcription is exactly the work people start and then switch away from, often with the
+ * window minimised, so that is the case where the promise has to hold and the one where it did not.
+ *
+ * logind knows no such condition. `cat` is what keeps the inhibitor alive: it holds our pipe, so when this
+ * process dies — cleanly or not — the pipe closes, `cat` ends and the inhibitor goes with it. A crash can
+ * therefore not leave a machine that refuses to sleep.
+ */
+const holdInhibitor = (): void => {
+  if (process.platform !== 'linux' || inhibitor !== null) return;
+
+  const child = spawn(
+    'systemd-inhibit',
+    ['--what=idle:sleep', '--mode=block', '--who=MagScribe', '--why=Transcription in progress', 'cat'],
+    { stdio: ['pipe', 'ignore', 'ignore'] },
+  );
+  // No systemd, no binary, no permission: then the blocker above is all there is, and the run still works.
+  const forget = (): void => {
+    if (inhibitor === child) inhibitor = null;
+  };
+  child.on('error', forget);
+  child.on('exit', forget);
+  inhibitor = child;
+};
+
+const releaseInhibitor = (): void => {
+  inhibitor?.kill();
+  inhibitor = null;
+};
 
 /** The renderer tells us when a transcription is in flight; the main process guards the machine around it. */
 const setWorking = (value: boolean): void => {
@@ -114,10 +151,12 @@ const setWorking = (value: boolean): void => {
   // A long transcription is unattended work — do not let the machine doze off in the middle of it.
   if (working && sleepBlocker === null) {
     sleepBlocker = powerSaveBlocker.start('prevent-app-suspension');
+    holdInhibitor();
   }
   if (!working && sleepBlocker !== null) {
     powerSaveBlocker.stop(sleepBlocker);
     sleepBlocker = null;
+    releaseInhibitor();
   }
 };
 
@@ -395,6 +434,7 @@ ipcMain.on('ffmpeg:download', () => void shell.openExternal('https://ffmpeg.org/
 app.on('will-quit', () => {
   cancelFfmpeg(); // a conversion still running would outlive the window
   discardExport();
+  releaseInhibitor(); // the pipe would do it anyway; this is the tidy way out
 });
 
 // A dead GPU process takes the WebGPU device and the model with it; the renderer would otherwise wait forever at 0 %.
