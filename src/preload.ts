@@ -1,9 +1,18 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { UiLang } from './i18n';
 
 export type SelectedFile = { path: string; name: string; size: number };
 export type ExportedAudio = { path: string; size: number }; // an OGG/Opus file in the temp folder, see audio.ts
 export type Theme = 'light' | 'dark' | 'system';
+
+// Every `on*` below hands back its own remover: production mounts once, but HMR in dev would otherwise
+// stack a second listener on every reload and the window would process each message twice.
+const subscribe = (channel: string, relay: (event: IpcRendererEvent, ...args: unknown[]) => void): (() => void) => {
+  ipcRenderer.on(channel, relay);
+  return () => {
+    ipcRenderer.off(channel, relay);
+  };
+};
 
 // The only bridge between the renderer and the system. Keep it to what the UI actually needs.
 const api = {
@@ -17,6 +26,8 @@ const api = {
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
   // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
   cancelAudio: (): void => ipcRenderer.send('audio:cancel'),
+  // Kills the claude run behind summarize/chapters; safe to call when there is none.
+  cancelAi: (): void => ipcRenderer.send('ai:cancel'),
   // Asked once on startup: without a system ffmpeg neither conversion can run, and the window says so instead
   // of failing on the first click. The app ships no binary of its own — see audio.ts for why.
   hasFfmpeg: (): Promise<boolean> => ipcRenderer.invoke('ffmpeg:present'),
@@ -26,9 +37,8 @@ const api = {
   // hold in memory, which is what that decoder would do with it.
   readBytes: (filePath: string): Promise<Uint8Array> => ipcRenderer.invoke('file:bytes', filePath),
   // Percentage of the extract/export ffmpeg is currently running.
-  onAudioProgress: (listener: (percent: number) => void): void => {
-    ipcRenderer.on('audio:progress', (_event, percent: unknown) => listener(Number(percent)));
-  },
+  onAudioProgress: (listener: (percent: number) => void): (() => void) =>
+    subscribe('audio:progress', (_event, percent: unknown) => listener(Number(percent))),
   // Both run the local claude CLI in main: a summary of the plain transcript, chapters of the timestamped one.
   // `prompt` is whatever the settings window holds; main falls back to the built-in instruction without one.
   summarize: (transcript: string, prompt: string): Promise<string> =>
@@ -50,14 +60,11 @@ const api = {
   setLang: (lang: UiLang): void => ipcRenderer.send('lang:set', lang),
   notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
   // Main asks before closing a window that is still working; the window answers with its own dialog.
-  onCloseAsk: (listener: () => void): void => {
-    ipcRenderer.on('close:ask', () => listener());
-  },
+  onCloseAsk: (listener: () => void): (() => void) => subscribe('close:ask', () => listener()),
   answerClose: (quit: boolean): void => ipcRenderer.send('close:answer', quit),
   // Main reports a crashed GPU process here; the model is gone with it, so the UI must stop waiting.
-  onGpuGone: (listener: (message: string) => void): void => {
-    ipcRenderer.on('gpu:gone', (_event, message: unknown) => listener(String(message)));
-  },
+  onGpuGone: (listener: (message: string) => void): (() => void) =>
+    subscribe('gpu:gone', (_event, message: unknown) => listener(String(message))),
 };
 
 contextBridge.exposeInMainWorld('api', api);

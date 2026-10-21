@@ -58,6 +58,11 @@ const config: ForgeConfig = {
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
+      // The app lives on app://; file:// privileges buy it nothing, and an Electron upgrade that adds a fuse
+      // should fail the build instead of quietly shipping it on a default.
+      [FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
+      [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false, // no snapshot of our own to load
+      strictlyRequireAllFuses: true,
     }),
   ],
 };

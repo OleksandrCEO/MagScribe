@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
 import { app } from 'electron';
 import { t } from './i18n';
 import { CHAPTERS_PROMPT, SUMMARY_PROMPT, type AiTask } from './prompts';
@@ -16,6 +16,15 @@ const TIMEOUT_MS = 300_000;
 //   stops reading the OAuth login and demands an API key, so it is not an option for a subscription user.)
 const FENCED_OFF = 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task';
 
+// The window runs one task at a time (`job` is a single union), so one handle is all the cancelling needs.
+let child: ChildProcess | null = null;
+
+/** Drops the run the window gave up on. Safe to call when there is none; the kill arrives as `error.killed`. */
+export const cancelAi = (): void => {
+  child?.kill();
+  child = null;
+};
+
 /** Runs the local `claude` CLI over a transcript. Anything that goes wrong comes back as a readable message. */
 const runClaude = (prompt: string, input: string): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -24,6 +33,7 @@ const runClaude = (prompt: string, input: string): Promise<string> =>
       ['-p', prompt, '--disallowed-tools', FENCED_OFF],
       { cwd: app.getPath('temp'), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout, stderr) => {
+        child = null;
         if (!error) {
           resolve(stdout.trim());
           return;
@@ -46,6 +56,7 @@ const runClaude = (prompt: string, input: string): Promise<string> =>
       },
     );
 
+    child = claude;
     claude.stdin?.end(input);
   });
 

