@@ -27,7 +27,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Textarea } from '@/components/ui/textarea';
 import { findGpu, isRealGpu, type Gpu } from '@/gpu';
 import { formatSize, pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
-import { cachedModels, deleteModel, modelBytes, MODELS, MODEL_IDS, recommendedModel, type ModelId } from '@/models';
+import {
+  deleteModel,
+  modelBytes,
+  modelStates,
+  MODELS,
+  MODEL_IDS,
+  recommendedModel,
+  type ModelId,
+  type ModelState,
+} from '@/models';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { AiTask, Prompts } from '@/prompts';
 import {
@@ -151,7 +160,7 @@ export default function App() {
   // Which model this window works with, which ones are already on disk, and what the machine can run. `modelId`
   // is null only for the moment the adapter is being probed, before anything decides anything.
   const [modelId, setModelId] = useState<ModelId | null>(null);
-  const [cached, setCached] = useState<ModelId[]>([]);
+  const [models, setModels] = useState<Record<ModelId, ModelState>>({ small: 'none', turbo: 'none' });
   const [gpu, setGpu] = useState<Gpu | null>(null);
   const [started, setStarted] = useState(false); // a worker was spawned, i.e. the download was agreed to
   const [askModel, setAskModel] = useState<ModelId | null>(null); // the «download the model?» window, and for which
@@ -177,7 +186,9 @@ export default function App() {
   const [ffmpegReady, setFfmpegReady] = useState(true);
 
   const s = STRINGS[uiLang]; // every line this window shows
-  const fp16 = gpu?.fp16 === true; // which of the two download sizes is the real one here
+  // Which of the two download sizes is the real one here: a software adapter is refused, so it loads the
+  // same weights as a machine with no card at all.
+  const fp16 = isRealGpu(gpu) && gpu.fp16;
   const recommended = recommendedModel(isRealGpu(gpu));
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
@@ -217,7 +228,7 @@ export default function App() {
         setDownload(100);
         setModel({ adapter: message.adapter, encoder: message.encoder });
         // It is on disk now, so the settings window stops offering to download what is already here.
-        setCached((have) => (have.includes(id) ? have : [...have, id]));
+        setModels((current) => ({ ...current, [id]: 'ready' }));
         ready.current = true;
       }
       if (message.type === 'fallback') setFallback(s.error.fallback(message.from, message.reason));
@@ -267,18 +278,23 @@ export default function App() {
     // What this machine has, and what it already holds. A model in the cache loads without touching the
     // network, so there is nothing to ask about; an empty cache means a download, and that is the person's
     // call — see docs/concept.md. With nothing chosen yet, the adapter decides which one is offered.
-    void Promise.all([findGpu(), cachedModels()]).then(([adapter, have]) => {
+    void (async () => {
+      // The adapter first: which files a model would fetch here depends on it, and so does what counts as cached.
+      const adapter = await findGpu();
+      const state = await modelStates(isRealGpu(adapter) && adapter.fp16);
+      const ready = MODEL_IDS.filter((id) => state[id] === 'ready');
       const fits = recommendedModel(isRealGpu(adapter));
       // With nothing chosen yet: what this machine should run, unless it is not here and another one is —
       // downloading a second model while the first sits in the cache helps nobody.
-      const first = have.length === 0 || have.includes(fits) ? fits : have[0];
+      const first = ready.length === 0 || ready.includes(fits) ? fits : ready[0];
       const pick = readSetting(MODEL_KEY, MODEL_IDS, first);
+
       setGpu(adapter);
-      setCached(have);
+      setModels(state);
       setModelId(pick);
-      if (have.includes(pick)) spawnWorker(pick);
+      if (state[pick] === 'ready') spawnWorker(pick);
       else setAskModel(pick);
-    });
+    })();
 
     void window.api.hasFfmpeg().then(setFfmpegReady);
     // The percentage of whichever ffmpeg run is going on; nothing else in main reports one.
@@ -453,7 +469,7 @@ export default function App() {
    * «Not now» would leave the window pointing at a model it does not have.
    */
   const chooseModel = (id: ModelId): void => {
-    if (!cached.includes(id)) {
+    if (models[id] !== 'ready') {
       setAskModel(id);
       return;
     }
@@ -476,7 +492,7 @@ export default function App() {
   const forgetModel = async (id: ModelId): Promise<void> => {
     try {
       await deleteModel(id);
-      setCached((have) => have.filter((kept) => kept !== id));
+      setModels((current) => ({ ...current, [id]: 'none' }));
       toast.success(s.toast.modelDeleted);
     } catch (error) {
       failWith(error);
@@ -1135,7 +1151,7 @@ export default function App() {
         <ModelPicker
           s={s}
           value={askModel ?? recommended}
-          cached={cached}
+          states={models}
           recommended={recommended}
           fp16={fp16}
           busy={false}
@@ -1166,7 +1182,7 @@ export default function App() {
         lang={uiLang}
         onLang={setUiLangState}
         model={modelId ?? recommended}
-        models={cached}
+        states={models}
         recommended={recommended}
         fp16={fp16}
         modelBusy={busy || modelStage === 'downloading' || modelStage === 'preparing'}

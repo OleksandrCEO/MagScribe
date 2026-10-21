@@ -31,4 +31,4 @@ export const findGpu = async (): Promise<Gpu | null> => {
 };
 
 /** Whether the big model is worth offering: a real card, not the software one. */
-export const isRealGpu = (gpu: Gpu | null): boolean => gpu !== null && !gpu.software;
+export const isRealGpu = (gpu: Gpu | null): gpu is Gpu => gpu !== null && !gpu.software;

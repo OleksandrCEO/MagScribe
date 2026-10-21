@@ -14,23 +14,41 @@ export const MODEL_IDS: readonly ModelId[] = ['small', 'turbo'];
 
 const MB = 1024 * 1024;
 
+/** The quantisations we use. The names are the file suffixes on HuggingFace, which is also how `caches` tells them apart. */
+export type Quant = 'fp16' | 'q4' | 'int8';
+
+/** One pair of files the worker loads, and what the two of them weigh together. */
+export type Weights = { encoder_model: Quant; decoder_model_merged: Quant; bytes: number };
+
 /**
- * Sizes read off the HuggingFace blob list on 21.10.2026, as the pair of files the worker really fetches:
- * `encoder_model_fp16` + `decoder_model_merged_q4` on a card with `shader-f16`, both `q4` everywhere else.
- * They are approximate on purpose — the tokenizer and the configs add a couple of megabytes on top.
+ * Sizes read off the HuggingFace blob list on 21.10.2026, for exactly the pair of files each case fetches;
+ * approximate on purpose, since the tokenizer and the configs add a couple of megabytes on top.
+ *
+ * The quantisation is per model, not global. Turbo stays on q4: at 809M parameters 4-bit costs it little, and
+ * q4 is the path onnxruntime's WebGPU backend handles best. Small is 244M, where 4-bit bites much harder — and
+ * int8 happens to be the *smaller* download for it too (88 + 149 MB against 63 + 222), because q4 only
+ * quantises part of its decoder.
  */
-export const MODELS: Record<ModelId, { repo: string; name: string; fp16: number; q4: number }> = {
-  small: { repo: 'onnx-community/whisper-small', name: 'Whisper small', fp16: 391 * MB, q4: 286 * MB },
+export const MODELS: Record<ModelId, { repo: string; name: string; withF16: Weights; plain: Weights }> = {
+  small: {
+    repo: 'onnx-community/whisper-small',
+    name: 'Whisper small',
+    withF16: { encoder_model: 'fp16', decoder_model_merged: 'int8', bytes: 318 * MB },
+    plain: { encoder_model: 'int8', decoder_model_merged: 'int8', bytes: 237 * MB },
+  },
   turbo: {
     repo: 'onnx-community/whisper-large-v3-turbo',
     name: 'Whisper large-v3-turbo',
-    fp16: 1534 * MB,
-    q4: 724 * MB,
+    withF16: { encoder_model: 'fp16', decoder_model_merged: 'q4', bytes: 1534 * MB },
+    plain: { encoder_model: 'q4', decoder_model_merged: 'q4', bytes: 724 * MB },
   },
 };
 
-/** What a download of this model costs here; `fp16` is what the adapter reported, see `gpu.ts`. */
-export const modelBytes = (id: ModelId, fp16: boolean): number => (fp16 ? MODELS[id].fp16 : MODELS[id].q4);
+/** `fp16` is what the adapter reported (see `gpu.ts`): a card with `shader-f16` keeps the encoder in half floats. */
+export const weightsFor = (id: ModelId, fp16: boolean): Weights => (fp16 ? MODELS[id].withF16 : MODELS[id].plain);
+
+/** What a download of this model costs on this machine. */
+export const modelBytes = (id: ModelId, fp16: boolean): number => weightsFor(id, fp16).bytes;
 
 /** Where a machine starts: the large model is worth it only on a real card. */
 export const recommendedModel = (gpu: boolean): ModelId => (gpu ? 'turbo' : 'small');
@@ -52,10 +70,35 @@ const cachedUrls = async (): Promise<string[]> => {
   }
 };
 
-/** Which models are on disk already, i.e. which of them load without touching the network. */
-export const cachedModels = async (): Promise<ModelId[]> => {
+/**
+ * `ready` — the exact two files this machine would load are here, so loading touches no network.
+ * `stale` — something from that repository is cached, but not those two: the configs and the tokenizer of a
+ *           download that never finished (transformers.js fetches those first), or weights in a quantisation
+ *           this app no longer asks for. Useless bytes, and the only reason the settings window offers to
+ *           delete a model it does not consider downloaded.
+ * `none`  — nothing at all.
+ */
+export type ModelState = 'none' | 'stale' | 'ready';
+
+/** The state of every model, as the cache has it. `fp16` decides which files «the right ones» are. */
+export const modelStates = async (fp16: boolean): Promise<Record<ModelId, ModelState>> => {
   const urls = await cachedUrls();
-  return MODEL_IDS.filter((id) => urls.some((url) => url.includes(MODELS[id].repo)));
+  const has = (repo: string, file: string): boolean =>
+    urls.some((url) => url.includes(`${repo}/`) && url.includes(file));
+
+  const state = (id: ModelId): ModelState => {
+    const { repo } = MODELS[id];
+    const weights = weightsFor(id, fp16);
+    if (
+      has(repo, `encoder_model_${weights.encoder_model}.onnx`) &&
+      has(repo, `decoder_model_merged_${weights.decoder_model_merged}.onnx`)
+    ) {
+      return 'ready';
+    }
+    return urls.some((url) => url.includes(`${repo}/`)) ? 'stale' : 'none';
+  };
+
+  return { small: state('small'), turbo: state('turbo') };
 };
 
 /** Removes one model's files and leaves the other one alone. */

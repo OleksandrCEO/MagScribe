@@ -3,7 +3,7 @@ import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
-import { modelBytes, MODEL_IDS, MODELS, type ModelId } from '@/models';
+import { modelBytes, MODEL_IDS, MODELS, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
@@ -116,7 +116,7 @@ function Modal({ open, title, close, onClose, children }: ModalProps) {
 type PickerProps = {
   s: Strings;
   value: ModelId;
-  cached: ModelId[];
+  states: Record<ModelId, ModelState>;
   recommended: ModelId;
   fp16: boolean; // what the adapter reported: it decides which of the two download sizes is the real one
   busy: boolean; // a model is loading or working, so this is no moment to delete or swap it
@@ -125,7 +125,7 @@ type PickerProps = {
 };
 
 /** The two models, with what each would cost here. Used by the settings window and by the first-run question. */
-export function ModelPicker({ s, value, cached, recommended, fp16, busy, onChange, onDelete }: PickerProps) {
+export function ModelPicker({ s, value, states, recommended, fp16, busy, onChange, onDelete }: PickerProps) {
   return (
     <div className="flex flex-col gap-1.5">
       {MODEL_IDS.map((id) => (
@@ -148,22 +148,25 @@ export function ModelPicker({ s, value, cached, recommended, fp16, busy, onChang
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="text-[13px] font-medium">
                 {MODELS[id].name}
-                {cached.includes(id) ? (
-                  <span className="ml-2 text-[11px] font-normal text-muted-foreground">{s.model.downloaded}</span>
-                ) : (
-                  id === recommended && (
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      {s.model.recommended}
-                    </span>
-                  )
-                )}
+                {/* One note after the name: downloaded, leftovers of a quantisation we no longer use, or — for
+                    a model that is neither — the one this machine should take. */}
+                <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                  {states[id] === 'ready'
+                    ? s.model.downloaded
+                    : states[id] === 'stale'
+                      ? s.model.stale
+                      : id === recommended
+                        ? s.model.recommended
+                        : ''}
+                </span>
               </span>
               <span className="text-[11.5px] text-muted-foreground">
                 {s.model[id]} · ≈ {formatSize(modelBytes(id, fp16), s)}
               </span>
             </span>
           </button>
-          {onDelete && cached.includes(id) && (
+          {/* Stale files are deletable too — they are the only way those megabytes ever leave the disk. */}
+          {onDelete && states[id] !== 'none' && (
             <Button
               variant="ghost"
               size="xs"
@@ -186,7 +189,7 @@ type SettingsProps = {
   lang: UiLang;
   onLang: (lang: UiLang) => void;
   model: ModelId;
-  models: ModelId[]; // which ones are on disk
+  states: Record<ModelId, ModelState>; // what the cache holds for each
   recommended: ModelId;
   fp16: boolean;
   modelBusy: boolean; // the model is loading or working: swapping or deleting it mid-run is nobody's intent
@@ -203,7 +206,7 @@ export function SettingsDialog({
   lang,
   onLang,
   model,
-  models,
+  states,
   recommended,
   fp16,
   modelBusy,
@@ -243,7 +246,7 @@ export function SettingsDialog({
           <ModelPicker
             s={s}
             value={model}
-            cached={models}
+            states={states}
             recommended={recommended}
             fp16={fp16}
             busy={modelBusy}

@@ -176,6 +176,7 @@ const uk = {
     turbo: 'найточніша, для відеокарти',
     recommended: 'рекомендована',
     downloaded: 'завантажена',
+    stale: 'залишки на диску',
   },
 
   ffmpegDialog: {
@@ -379,6 +380,7 @@ const en: typeof uk = {
     turbo: 'most accurate, for the graphics card',
     recommended: 'recommended',
     downloaded: 'downloaded',
+    stale: 'leftovers on disk',
   },
 
   ffmpegDialog: {

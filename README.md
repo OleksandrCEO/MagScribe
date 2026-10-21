@@ -54,7 +54,7 @@
   ffmpeg не працює взагалі: кодувати Opus нічим.
 - **Відеокарта з Vulkan** — не обов'язково, але без неї модель піде на CPU (wasm) і прогін буде в рази довшим.
 - **`claude` CLI** — лише для конспекту й таймкодів. Решта працює без нього.
-- від 300 МБ до 1,5 ГБ вільного місця під кеш моделі — залежно від того, яку вибрати.
+- від 250 МБ до 1,5 ГБ вільного місця під кеш моделі — залежно від того, яку вибрати.
 
 ## Моделі
 
@@ -62,7 +62,7 @@
 
 | Модель | Для чого | Розмір |
 |---|---|---|
-| [`onnx-community/whisper-small`](https://huggingface.co/onnx-community/whisper-small) | процесор або мало памʼяті — швидша, точність нижча | ≈ 286 МБ (391 МБ на карті з `shader-f16`) |
+| [`onnx-community/whisper-small`](https://huggingface.co/onnx-community/whisper-small) | процесор або мало памʼяті — швидша, точність нижча | ≈ 237 МБ (318 МБ на карті з `shader-f16`) |
 | [`onnx-community/whisper-large-v3-turbo`](https://huggingface.co/onnx-community/whisper-large-v3-turbo) | відеокарта — найточніша | ≈ 724 МБ (1,5 ГБ на карті з `shader-f16`) |
 
 Обидві — ONNX-конверсії MIT-ліцензованого [`openai/whisper`](https://huggingface.co/openai/whisper-large-v3-turbo).

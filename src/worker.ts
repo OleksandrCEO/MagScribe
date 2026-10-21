@@ -8,7 +8,7 @@ import {
 } from '@huggingface/transformers';
 import { findGpu } from './gpu';
 import { setUiLang, t, type UiLang } from './i18n';
-import { MODELS, type ModelId } from './models';
+import { MODELS, weightsFor, type ModelId, type Weights } from './models';
 import { SAMPLE_RATE } from './pcm';
 import { toSegments, type Segment } from './subtitles';
 
@@ -38,23 +38,19 @@ export type WorkerResponse =
   | { type: 'result'; text: string; segments: Segment[] }
   | { type: 'error'; message: string };
 
-// Quantisation per the model cards, and the same pair for both of them: fp16 encoder + q4 decoder on WebGPU;
-// without shader-f16 the
-// encoder goes 4-bit too, because the fp32 encoder keeps its weights in a 2.5 GB side file. On wasm both halves
-// are 4-bit: the int8 decoder fails to load there with a missing scale. The int8-vs-q4 timings in the git history
-// were taken on SwiftShader, not on a GPU, so treat them as CPU numbers.
-type Dtype = Record<'encoder_model' | 'decoder_model_merged', 'fp16' | 'q4'>;
-const Q4: Dtype = { encoder_model: 'q4', decoder_model_merged: 'q4' };
-
-type Picked = { adapter: string; dtype: Dtype };
+// Which files to load is the model's own business now — see `MODELS` in models.ts, where each one carries the
+// pair it wants with and without `shader-f16`. The fp32 encoder is never an option: it keeps its weights in a
+// multi-gigabyte side file. (The int8-vs-q4 timings in the git history were taken on SwiftShader, not on a
+// GPU, so treat them as CPU numbers.)
+type Picked = { adapter: string; weights: Weights };
 
 // A software adapter is refused rather than used: it is just as slow as wasm and it lies in the status line.
-const pickWebGpu = async (): Promise<Picked> => {
+const pickWebGpu = async (model: ModelId): Promise<Picked> => {
   const gpu = await findGpu();
   if (!gpu) throw new Error(t().error.adapterNull);
   if (gpu.software) throw new Error(t().error.softwareAdapter(gpu.label));
 
-  return { adapter: `WebGPU · ${gpu.label}`, dtype: gpu.fp16 ? { ...Q4, encoder_model: 'fp16' } : Q4 };
+  return { adapter: `WebGPU · ${gpu.label}`, weights: weightsFor(model, gpu.fp16) };
 };
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
@@ -72,13 +68,18 @@ const load = async (model: ModelId): Promise<void> => {
 
   for (const device of devices) {
     try {
-      const picked: Picked = device === 'webgpu' ? await pickWebGpu() : { adapter: 'CPU · wasm', dtype: Q4 };
+      const picked: Picked =
+        device === 'webgpu'
+          ? await pickWebGpu(model)
+          : { adapter: 'CPU · wasm', weights: weightsFor(model, false) };
+      // `bytes` in the pair is for the window to show; the pipeline is given the two quantisations themselves.
+      const { encoder_model, decoder_model_merged } = picked.weights;
       transcriber = await pipeline('automatic-speech-recognition', MODELS[model].repo, {
         device,
-        dtype: picked.dtype,
+        dtype: { encoder_model, decoder_model_merged },
         progress_callback: reportDownload,
       });
-      post({ type: 'ready', adapter: picked.adapter, encoder: picked.dtype.encoder_model });
+      post({ type: 'ready', adapter: picked.adapter, encoder: encoder_model });
       return;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
