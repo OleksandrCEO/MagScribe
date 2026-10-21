@@ -134,13 +134,14 @@ type ConfirmProps = {
   title: string;
   cancel: string;
   confirm: string;
+  tone?: 'destructive' | 'default'; // destructive by default: most of these questions cost something
   onConfirm: () => void;
   onClose: () => void;
   children: ReactNode;
 };
 
 /** The one question the app asks before something it cannot take back. Esc and the backdrop mean «no». */
-export function ConfirmDialog({ open, title, cancel, confirm, onConfirm, onClose, children }: ConfirmProps) {
+export function ConfirmDialog({ open, title, cancel, confirm, tone = 'destructive', onConfirm, onClose, children }: ConfirmProps) {
   return (
     <Modal open={open} title={title} onClose={onClose}>
       <div className="flex flex-col gap-5">
@@ -149,7 +150,7 @@ export function ConfirmDialog({ open, title, cancel, confirm, onConfirm, onClose
           <Button variant="ghost" size="lg" className="px-4" onClick={onClose}>
             {cancel}
           </Button>
-          <Button variant="destructive" size="lg" className="px-4" onClick={onConfirm}>
+          <Button variant={tone} size="lg" className="px-4" onClick={onConfirm}>
             {confirm}
           </Button>
         </div>
@@ -173,6 +174,12 @@ export function AboutDialog({ open, engine, onClose }: { open: boolean; engine: 
           <code>claude</code> — тобто транскрипт для них іде в Anthropic.
         </p>
         <p>Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.</p>
+        <p>
+          Модель — <span className="text-foreground">openai/whisper-large-v3-turbo</span> (MIT) у ONNX-конверсії
+          onnx-community; звук читає системний <code>ffmpeg</code>. Умови сторонніх компонентів — у файлі{' '}
+          <span className="text-foreground">THIRD-PARTY-LICENSES.md</span> поруч із застосунком. Сам MagScribe —
+          під MIT.
+        </p>
       </div>
     </Modal>
   );

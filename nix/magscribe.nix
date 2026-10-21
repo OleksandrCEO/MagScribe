@@ -78,9 +78,14 @@ pkgs.stdenv.mkDerivation {
   postFixup = ''
     makeWrapper $out/lib/magscribe/transcriber $out/bin/magscribe \
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
+      --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]} \
       --add-flags "--force-device-scale-factor=1"
   '';
 
+  # PATH above is how the app finds ffmpeg: it ships none of its own, because the prebuilt static builds are
+  # GPLv3 and conveying one would oblige us to publish matching sources for every library inside it — for
+  # encoders this app never calls. nixpkgs' ffmpeg is the user's own copy, so nothing is conveyed.
+  #
   # /run/opengl-driver/lib above is not decoration: Chromium's GPU process dlopens libGLX_nvidia.so.0 by soname
   # before it enters its sandbox, and that is the copy the Vulkan ICD manifest in /etc/vulkan/icd.d resolves to.
   # Drop it and WebGPU falls back to SwiftShader on the CPU. The scale-factor flag is for KDE Wayland, which

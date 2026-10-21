@@ -16,6 +16,11 @@ const api = {
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
   // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
   cancelAudio: (): void => ipcRenderer.send('audio:cancel'),
+  // Asked once on startup: without a system ffmpeg neither conversion can run, and the window says so instead
+  // of failing on the first click. The app ships no binary of its own — see audio.ts for why.
+  hasFfmpeg: (): Promise<boolean> => ipcRenderer.invoke('ffmpeg:present'),
+  // Opens ffmpeg's download page. The URL lives in main and takes no argument from here.
+  openFfmpegDownload: (): void => ipcRenderer.send('ffmpeg:download'),
   // Percentage of the extract/export ffmpeg is currently running.
   onAudioProgress: (listener: (percent: number) => void): void => {
     ipcRenderer.on('audio:progress', (_event, percent: unknown) => listener(Number(percent)));

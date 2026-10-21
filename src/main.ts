@@ -11,13 +11,14 @@ import {
   powerSaveBlocker,
   protocol,
   screen,
+  shell,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
-import { cancelFfmpeg, discardExport, exportAudio, extractAudio, isExport } from './audio';
+import { cancelFfmpeg, discardExport, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS } from './summary';
 
@@ -128,10 +129,22 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true, // the default, spelled out: the preload below relies on it
     },
   });
 
   const window = mainWindow;
+
+  // The preload is attached to every navigation this webContents makes, so a page outside the bundle would get
+  // the whole window.api — and with it the claude CLI. The summary is markdown from a model that read an
+  // untrusted recording, and react-markdown renders https links as clickable. Nothing here ever needs to leave
+  // the bundle, so nothing is allowed to.
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(`${APP_ORIGIN}/`)) return;
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
+    event.preventDefault();
+  });
 
   const show = (): void => {
     if (!window.isDestroyed() && !window.isVisible()) window.show();
@@ -306,6 +319,7 @@ ipcMain.on('audio:cancel', cancelFfmpeg);
 
 // The answer to that question. Anything but a clear yes leaves the window alone.
 ipcMain.on('close:answer', (_event, quit: unknown) => {
+  if (!closing) return; // an answer to a question nobody asked destroys a window mid-run
   closing = false;
   if (quit !== true || mainWindow === null) return;
 
@@ -325,8 +339,10 @@ ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
 });
 
 ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: unknown): Promise<string> => {
-  const run = AI_TASKS[task as AiTask] as typeof AI_TASKS[AiTask] | undefined;
-  if (!run) throw new Error(`ai:run: unknown task ${String(task)}`);
+  // hasOwn, not a truthiness check: AI_TASKS['toString'] would otherwise hand back Object.prototype's method
+  // and the window would show its return value as a summary.
+  if (typeof task !== 'string' || !Object.hasOwn(AI_TASKS, task)) throw new Error(`ai:run: unknown task ${String(task)}`);
+  const run = AI_TASKS[task as AiTask];
   if (typeof transcript !== 'string' || transcript.trim().length === 0) throw new Error('ai:run needs a transcript');
 
   // The prompt comes from a text box in the settings window: anything odd falls back to the built-in one.
@@ -348,7 +364,16 @@ app.on('ready', () => {
   createWindow();
 });
 
-app.on('will-quit', discardExport);
+// Whether the machine has an ffmpeg at all; the window asks once and offers the download page if it has not.
+ipcMain.handle('ffmpeg:present', (): boolean => ffmpegBinary() !== null);
+
+// The one external link the app opens, and it is a constant: nothing from the renderer reaches shell.
+ipcMain.on('ffmpeg:download', () => void shell.openExternal('https://ffmpeg.org/download.html'));
+
+app.on('will-quit', () => {
+  cancelFfmpeg(); // a conversion still running would outlive the window
+  discardExport();
+});
 
 // A dead GPU process takes the WebGPU device and the model with it; the renderer would otherwise wait forever at 0 %.
 app.on('child-process-gone', (_event, details) => {

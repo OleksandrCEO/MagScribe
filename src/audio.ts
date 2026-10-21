@@ -8,11 +8,38 @@ export const SAMPLE_RATE = 16_000;
 
 const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 
-// Packaged builds get the binary via packagerConfig.extraResource — the Vite plugin strips node_modules
-// from the asar, so it cannot be required from there at runtime.
-const ffmpegPath = app.isPackaged
-  ? path.join(process.resourcesPath, binaryName)
-  : path.join(app.getAppPath(), 'node_modules', 'ffmpeg-static', binaryName);
+/**
+ * The system's ffmpeg, looked up on PATH once at startup.
+ *
+ * We deliberately do not ship a binary: the prebuilt static builds are GPLv3 (their x264/x265 encoders force
+ * it), and conveying one would oblige us to publish matching sources for ffmpeg and every library linked into
+ * it — for capability this app never uses. It only decodes to raw PCM and encodes Opus. The distro's own copy
+ * is the user's own copy, so nothing is conveyed and nothing is owed.
+ */
+const findFfmpeg = (): string | null => {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (dir === '') continue;
+    const candidate = path.join(dir, binaryName);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // not here, keep looking
+    }
+  }
+  return null;
+};
+
+let ffmpegPath: string | null | undefined; // undefined: PATH not searched yet
+
+/** Absolute path to ffmpeg, or null when the system has none. Re-checked after a failed lookup, so the user
+ *  can install ffmpeg and carry on without restarting the app. */
+export const ffmpegBinary = (): string | null => {
+  if (ffmpegPath === undefined || ffmpegPath === null) ffmpegPath = findFfmpeg();
+  return ffmpegPath;
+};
+
+export const FFMPEG_MISSING = 'Не знайдено ffmpeg. Встанови його — без нього не вийде ні прочитати звук, ні зберегти аудіо.';
 
 export type OnProgress = (percent: number) => void;
 
@@ -42,7 +69,19 @@ const runFfmpeg = (
   skip = 0, // seconds seeked past before decoding, so the percentage counts what is left and not the whole file
 ): Promise<void> =>
   new Promise((resolve, reject) => {
-    const ffmpeg = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'info', '-nostats', '-progress', 'pipe:2', ...args]);
+    const binary = ffmpegBinary();
+    if (binary === null) {
+      reject(new Error(FFMPEG_MISSING));
+      return;
+    }
+    // One conversion at a time: `running` is a single handle, and a second run would leave the first one
+    // unkillable. The window already prevents this; main does not take the window's word for it.
+    if (running !== null) {
+      reject(new Error('Конвертація вже триває'));
+      return;
+    }
+
+    const ffmpeg = spawn(binary, ['-hide_banner', '-loglevel', 'info', '-nostats', '-progress', 'pipe:2', ...args]);
     running = ffmpeg;
     let errorOutput = '';
     let pendingLine = '';
@@ -64,7 +103,10 @@ const runFfmpeg = (
       }
     });
 
-    ffmpeg.on('error', reject); // binary missing or not executable
+    ffmpeg.on('error', (error) => {
+      running = null; // a failed spawn must not leave the slot occupied forever
+      reject(error); // binary missing or not executable
+    });
     ffmpeg.on('close', (code) => {
       running = null;
       if (code === 0) resolve();
@@ -83,9 +125,11 @@ export const extractAudio = async (filePath: string, onProgress?: OnProgress, fr
   const chunks: Buffer[] = [];
   // -vn: video streams would only slow the decode down. -ss ahead of -i seeks on the input, which is the fast one,
   // and is how a resumed run decodes only the part it still needs.
+  // -protocol_whitelist file: a hostile playlist (.m3u8, concat) could otherwise make ffmpeg read other local
+  // files or go out to the network, and their audio would land in the transcript.
   await runFfmpeg(
-    [...(from > 0 ? ['-ss', String(from)] : []), '-i', filePath, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE),
-      '-f', 'f32le', 'pipe:1'],
+    ['-protocol_whitelist', 'file', ...(from > 0 ? ['-ss', String(from)] : []), '-i', filePath, '-vn', '-ac', '1',
+      '-ar', String(SAMPLE_RATE), '-f', 'f32le', 'pipe:1'],
     onProgress,
     (chunk) => chunks.push(chunk),
     from,
@@ -104,7 +148,12 @@ let lastExport: string | null = null;
 
 export const discardExport = (): void => {
   if (lastExport === null) return;
-  fs.rmSync(lastExport, { force: true });
+  try {
+    // The whole private directory, not just the file: mkdtemp made it for this one export.
+    fs.rmSync(path.dirname(lastExport), { recursive: true, force: true });
+  } catch {
+    // runs from will-quit; a temp file we cannot delete is not worth blocking the exit
+  }
   lastExport = null;
 };
 
@@ -114,9 +163,14 @@ export const isExport = (filePath: string): boolean => filePath === lastExport;
 /** Re-encodes the audio track to OGG/Opus in the temp folder — the container Telegram plays as a voice message. */
 export const exportAudio = async (filePath: string, onProgress?: OnProgress): Promise<ExportedAudio> => {
   discardExport();
-  const target = path.join(app.getPath('temp'), `magscribe-${process.pid}-${Date.now()}.ogg`);
+  // A private directory (0700) rather than a predictable name in a world-readable /tmp: the recording is the
+  // user's, and `-y` would happily follow a symlink someone else put there first.
+  const target = path.join(fs.mkdtempSync(path.join(app.getPath('temp'), 'magscribe-')), 'export.ogg');
   // ponytail: 64 kbps is plenty for speech and passable for music; raise it if the export is meant for listening
-  await runFfmpeg(['-y', '-i', filePath, '-vn', '-c:a', 'libopus', '-b:a', '64k', target], onProgress);
+  await runFfmpeg(
+    ['-protocol_whitelist', 'file', '-y', '-i', filePath, '-vn', '-c:a', 'libopus', '-b:a', '64k', target],
+    onProgress,
+  );
   lastExport = target;
 
   const { size } = await fs.promises.stat(target);

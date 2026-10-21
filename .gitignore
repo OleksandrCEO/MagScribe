@@ -119,3 +119,6 @@ Desktop.ini
 
 # Local test media
 assets/test.mp4
+
+# Personal working notes, not part of this project
+docs/claude.md

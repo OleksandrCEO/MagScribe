@@ -6,14 +6,14 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
-import ffmpegStatic from 'ffmpeg-static';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    // ffmpeg has to stay a real file on disk: it cannot run from inside the asar, and the Vite plugin
-    // drops node_modules from the package entirely. This copies it to <app>/resources/ffmpeg.
-    extraResource: ffmpegStatic ? [ffmpegStatic] : [],
+    // The OFL (fonts) and the MIT/ISC notices have to accompany the app itself, not just the repository, so
+    // the file lands next to the binary as <app>/resources/THIRD-PARTY-LICENSES.md. ffmpeg is deliberately
+    // not here: the app uses the system's own copy — see src/audio.ts.
+    extraResource: ['./THIRD-PARTY-LICENSES.md'],
     icon: './assets/icon', // packager appends .ico/.icns per platform
   },
   rebuildConfig: {},

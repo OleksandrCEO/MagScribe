@@ -47,9 +47,6 @@ const formatSize = (bytes: number): string => {
   return `${power === 0 ? value : value.toFixed(1)} ${units[power]}`;
 };
 
-const formatDuration = (seconds: number): string =>
-  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 const countLines = (text: string): number => text.split('\n').filter((line) => line.trim()).length;
@@ -126,6 +123,8 @@ export default function App() {
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
   const [confirming, setConfirming] = useState(false); // the stop is one click away from costing the subtitles
   const [closeAsked, setCloseAsked] = useState(false); // main caught a close while a run was in flight
+  const [noFfmpeg, setNoFfmpeg] = useState(false); // the machine has no ffmpeg and something needed it
+  const ffmpegReady = useRef(true); // asked once on startup; assume yes until main says otherwise
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -184,12 +183,16 @@ export default function App() {
       }
     });
 
+    // A worker that fails to load its own module never posts anything, and the window would wait forever.
+    worker.addEventListener('error', (event) => setModelError(event.message || 'Воркер не запустився'));
+
     worker.postMessage({ type: 'load' } satisfies WorkerRequest);
   };
 
   useEffect(() => {
     spawnWorker();
 
+    void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
     window.api.onAudioProgress(setConversion);
     window.api.onCloseAsk(() => setCloseAsked(true));
     window.api.onGpuGone((message) => {
@@ -207,7 +210,11 @@ export default function App() {
 
   useEffect(() => writePrompts(prompts), [prompts]);
 
-  const busy = converting || progress !== null || exporting || savingTrack;
+  // ffmpeg or the worker holding the file: this is what freezes the text and what the stop button can stop.
+  const running = converting || progress !== null || exporting || savingTrack;
+  // The claude run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
+  // window has to ask, and nothing new may start underneath it and then be overwritten by its answer.
+  const busy = running || aiTask !== null;
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -283,6 +290,10 @@ export default function App() {
   /** `from` resumes a stopped run at that second of the file, keeping the text it already produced. */
   const startTranscription = async (from?: number): Promise<void> => {
     if (!file || !workerRef.current) return;
+    if (!ffmpegReady.current) {
+      setNoFfmpeg(true);
+      return;
+    }
 
     const resuming = from !== undefined && from > 0;
     clearResults(resuming);
@@ -299,6 +310,7 @@ export default function App() {
     startedAt.current = Date.now();
     try {
       const samples = await window.api.extractAudio(file.path, from);
+      if (stopped.current) return; // the stop caught up while ffmpeg was finishing: the worker is a new one
       setProgress(0);
       workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
@@ -311,13 +323,19 @@ export default function App() {
 
   const convertToAudio = async (): Promise<void> => {
     if (!file) return;
+    if (!ffmpegReady.current) {
+      setNoFfmpeg(true);
+      return;
+    }
 
     clearResults();
     stopped.current = false;
     setConversion(0);
     setExporting(true);
     try {
-      setAudio(await window.api.exportAudio(file.path));
+      const track = await window.api.exportAudio(file.path);
+      if (stopped.current) return; // stopped mid-encode: do not throw the window onto the audio screen
+      setAudio(track);
     } catch (error) {
       if (!stopped.current) failWith(error);
     } finally {
@@ -332,12 +350,17 @@ export default function App() {
    */
   const saveTrack = async (): Promise<void> => {
     if (!file) return;
+    if (!ffmpegReady.current) {
+      setNoFfmpeg(true);
+      return;
+    }
 
     stopped.current = false;
     setConversion(0);
     setSavingTrack(true);
     try {
       const track = audio ?? (await window.api.exportAudio(file.path));
+      if (stopped.current) return; // stopped mid-encode: a save dialog nobody asked for is worse than nothing
       await save(window.api.saveAudio(track.path, `${baseName}.ogg`));
     } catch (error) {
       if (!stopped.current) failWith(error);
@@ -419,10 +442,10 @@ export default function App() {
         : 'Завантажую модель';
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
-  const stage = audio || exporting ? 'audio' : transcript || busy ? 'text' : 'pick';
+  const stage = audio || exporting ? 'audio' : transcript || running ? 'text' : 'pick';
   // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
   const screen: Screen = stage === 'text' ? view : stage;
-  const done = transcript !== '' && !busy;
+  const done = transcript !== '' && !running; // the text can still be copied and saved while claude thinks
   const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
 
   // Electron takes the window title from the document, so the taskbar can say which screen is open.
@@ -487,11 +510,11 @@ export default function App() {
     <Button
       size="lg"
       className="rounded-full px-4.5"
-      title="Вловити суть"
+      title="Опрацювати"
       disabled={!done || aiTask !== null}
       onClick={() => runAi('summary')}
     >
-      <SparklesIcon /> <span className={wideOnly}>{aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}</span>
+      <SparklesIcon /> <span className={wideOnly}>{aiTask === 'summary' ? 'Готую конспект…' : 'Опрацювати'}</span>
     </Button>
   );
 
@@ -599,7 +622,7 @@ export default function App() {
                       : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
               {screen === 'transcript' &&
                 elapsed !== null &&
-                ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
+                ` · розшифровано за ${timecode(elapsed)} · ${countWords(transcript)} слів`}
             </p>
 
             {screen === 'audio' ? (
@@ -622,7 +645,7 @@ export default function App() {
                   'field-sizing-fixed resize-none border-border focus-visible:ring-0 md:text-[15px] dark:bg-background',
                 )}
                 value={panelText}
-                readOnly={busy}
+                readOnly={running}
                 onChange={(event) => setPanelText(event.target.value)}
               />
             )}
@@ -711,7 +734,7 @@ export default function App() {
               {job.value !== undefined && (
                 <b className="font-medium text-foreground tabular-nums">{Math.round(job.value)} %</b>
               )}
-              {busy && (
+              {running && (
                 <Button
                   variant="ghost"
                   size="icon-xs"
@@ -759,7 +782,20 @@ export default function App() {
           title={fallback ?? undefined}
         >
           <span>{modelError ?? status}</span>
-          {!modelError && model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>}
+          {modelError ? (
+            <button
+              type="button"
+              className="w-fit text-[11px] underline underline-offset-2 opacity-90 hover:opacity-100"
+              onClick={() => {
+                setModelError(null);
+                spawnWorker();
+              }}
+            >
+              Спробувати ще раз
+            </button>
+          ) : (
+            model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>
+          )}
         </div>
 
         <div
@@ -983,6 +1019,31 @@ export default function App() {
           Якщо закрити зараз, усе розшифроване{' '}
           <span className="font-medium text-foreground">зникне без сліду</span> — на відміну від зупинки, тут
           нічого не лишається на екрані.
+        </p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={noFfmpeg}
+        title="Потрібен ffmpeg"
+        cancel="Зрозуміло"
+        confirm="Відкрити сайт ffmpeg"
+        tone="default"
+        onConfirm={() => {
+          window.api.openFfmpegDownload();
+          setNoFfmpeg(false);
+        }}
+        // Re-ask on the way out: ffmpeg may have been installed while this window was open.
+        onClose={() => {
+          setNoFfmpeg(false);
+          void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
+        }}
+      >
+        <p>
+          MagScribe читає звук із відео й зберігає аудіодоріжку чужими руками — утилітою{' '}
+          <span className="font-medium text-foreground">ffmpeg</span>. У системі її зараз немає.
+        </p>
+        <p>
+          У Linux вона майже завжди є в пакетах дистрибутива (<code>ffmpeg</code>); для Windows і macOS збірки
+          лежать на сайті проєкту.
         </p>
       </ConfirmDialog>
       <SettingsDialog
