@@ -127,24 +127,28 @@ export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsPr
   );
 }
 
-/** Asked before a stop that costs the subtitles — the one irreversible part of stopping. */
-export function StopDialog({ open, onStop, onClose }: { open: boolean; onStop: () => void; onClose: () => void }) {
+type ConfirmProps = {
+  open: boolean;
+  title: string;
+  cancel: string;
+  confirm: string;
+  onConfirm: () => void;
+  onClose: () => void;
+  children: ReactNode;
+};
+
+/** The one question the app asks before something it cannot take back. Esc and the backdrop mean «no». */
+export function ConfirmDialog({ open, title, cancel, confirm, onConfirm, onClose, children }: ConfirmProps) {
   return (
-    <Modal open={open} title="Зупинити транскрибацію?" onClose={onClose}>
+    <Modal open={open} title={title} onClose={onClose}>
       <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">
-          <p>Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.</p>
-          <p>
-            Але субтитри <span className="font-medium text-foreground">.srt</span> для цього файлу вже не
-            вийдуть: таймкоди складаються в одне ціле лише наприкінці повного прогону.
-          </p>
-        </div>
+        <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">{children}</div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="lg" className="px-4" onClick={onClose}>
-            Хай працює
+            {cancel}
           </Button>
-          <Button variant="destructive" size="lg" className="px-4" onClick={onStop}>
-            Зупинити
+          <Button variant="destructive" size="lg" className="px-4" onClick={onConfirm}>
+            {confirm}
           </Button>
         </div>
       </div>

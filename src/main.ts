@@ -99,6 +99,7 @@ const saveBounds = (window: BrowserWindow): void => {
 
 let mainWindow: BrowserWindow | null = null;
 let working = false;
+let closing = false; // a close was asked for and the window is showing its own question
 let sleepBlocker: number | null = null;
 
 /** The renderer tells us when a transcription is in flight; the main process guards the machine around it. */
@@ -145,19 +146,15 @@ const createWindow = () => {
     if (!working) return;
 
     event.preventDefault();
-    const answer = dialog.showMessageBoxSync(window, {
-      type: 'question',
-      buttons: ['Продовжити', 'Перервати'],
-      defaultId: 0,
-      cancelId: 0,
-      message: 'Робота ще триває',
-      detail: 'Якщо закрити вікно зараз, результат буде втрачено.',
-    });
-
-    if (answer === 1) {
+    // A second click on the system's close button overrides the question, so a renderer that stopped answering
+    // can never trap the person inside the app.
+    if (closing) {
       setWorking(false);
       window.destroy();
+      return;
     }
+    closing = true;
+    window.webContents.send('close:ask');
   });
 
   // and load the index.html of the app.
@@ -273,6 +270,16 @@ ipcMain.on('theme:set', (_event, theme: unknown) => {
 
 // Stopping a run: the renderer kills its own worker, main kills the conversion it may be sitting in.
 ipcMain.on('audio:cancel', cancelFfmpeg);
+
+// The answer to that question. Anything but a clear yes leaves the window alone.
+ipcMain.on('close:answer', (_event, quit: unknown) => {
+  closing = false;
+  if (quit !== true || mainWindow === null) return;
+
+  setWorking(false);
+  saveBounds(mainWindow);
+  mainWindow.destroy();
+});
 
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
 

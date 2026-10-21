@@ -29,8 +29,8 @@ import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Prompts } from '@/prompts';
 import {
   AboutDialog,
+  ConfirmDialog,
   SettingsDialog,
-  StopDialog,
   readPrompts,
   readSetting,
   writePrompts,
@@ -123,6 +123,7 @@ export default function App() {
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
   const [confirming, setConfirming] = useState(false); // the stop is one click away from costing the subtitles
+  const [closeAsked, setCloseAsked] = useState(false); // main caught a close while a run was in flight
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -188,6 +189,7 @@ export default function App() {
     spawnWorker();
 
     window.api.onAudioProgress(setConversion);
+    window.api.onCloseAsk(() => setCloseAsked(true));
     window.api.onGpuGone((message) => {
       setModelError(`${message}. Перезапусти застосунок.`);
       setProgress(null);
@@ -897,7 +899,41 @@ export default function App() {
         </TooltipProvider>
       </div>
 
-      <StopDialog open={confirming} onStop={stop} onClose={() => setConfirming(false)} />
+      <ConfirmDialog
+        open={confirming}
+        title="Зупинити транскрибацію?"
+        cancel="Хай працює"
+        confirm="Зупинити"
+        onConfirm={stop}
+        onClose={() => setConfirming(false)}
+      >
+        <p>Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.</p>
+        <p>
+          Але субтитри <span className="font-medium text-foreground">.srt</span> для цього файлу вже не вийдуть:
+          таймкоди складаються в одне ціле лише наприкінці повного прогону.
+        </p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={closeAsked}
+        title="Закрити застосунок?"
+        cancel="Хай працює"
+        confirm="Закрити"
+        onConfirm={() => {
+          setCloseAsked(false);
+          window.api.answerClose(true);
+        }}
+        onClose={() => {
+          setCloseAsked(false);
+          window.api.answerClose(false);
+        }}
+      >
+        <p>Робота ще триває.</p>
+        <p>
+          Якщо закрити зараз, усе розшифроване{' '}
+          <span className="font-medium text-foreground">зникне без сліду</span> — на відміну від зупинки, тут
+          нічого не лишається на екрані.
+        </p>
+      </ConfirmDialog>
       <SettingsDialog
         open={dialog === 'settings'}
         prompts={prompts}

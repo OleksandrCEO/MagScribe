@@ -38,6 +38,11 @@ const api = {
   // Main flips nativeTheme, so prefers-color-scheme (and with it the whole CSS theme) follows the choice.
   setTheme: (theme: Theme): void => ipcRenderer.send('theme:set', theme),
   notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
+  // Main asks before closing a window that is still working; the window answers with its own dialog.
+  onCloseAsk: (listener: () => void): void => {
+    ipcRenderer.on('close:ask', () => listener());
+  },
+  answerClose: (quit: boolean): void => ipcRenderer.send('close:answer', quit),
   // Main reports a crashed GPU process here; the model is gone with it, so the UI must stop waiting.
   onGpuGone: (listener: (message: string) => void): void => {
     ipcRenderer.on('gpu:gone', (_event, message: unknown) => listener(String(message)));
