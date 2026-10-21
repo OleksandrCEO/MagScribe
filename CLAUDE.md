@@ -97,4 +97,8 @@ Desktop app: converts video/audio files and transcribes them. Transcription runs
   - the next request is clearly a different kind of work from what came before — close the previous group first, then start the new one;
   - a burst of small requests has piled up: group them roughly every five messages so the history stays readable.
 - Commit format: `scope: description` (e.g. `window: restore size and position on launch`).
+- **Version: one commit, one patch.** `package.json` holds `0.x.y`; bump `y` by one in the same commit, and
+  roll the tenth into the next minor (`0.7.9` → `0.8.0`), so a minor reads as «ten improvements». Nothing
+  else carries a version: `nix/magscribe.nix` and the About window both read this field. Tag the minors
+  (`git tag v0.8.0`), not every commit. `1.0.0` comes when the app is actually released, not before.
 - Push only when asked.
