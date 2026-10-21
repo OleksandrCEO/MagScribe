@@ -50,7 +50,14 @@ const formatSize = (bytes: number): string => {
 
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
-const countLines = (text: string): number => text.split('\n').filter((line) => line.trim()).length;
+// Only a line that starts with a timecode is a chapter: a preamble or an empty numbering from the model
+// would otherwise be counted as one.
+const countChapters = (text: string): number =>
+  text.split('\n').filter((line) => /^\s*\d{1,2}:\d\d/.test(line)).length;
+
+// A token at a time would re-render the whole window while the GPU is busy. `result` always repaints the final
+// text, so the frames dropped in between cost nothing.
+const PAINT_EVERY_MS = 150;
 
 const THEME_KEY = 'theme';
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
@@ -89,6 +96,31 @@ const panelClass =
 // Under ~790 px the pill cannot hold its labels: the buttons fall back to their icons, and the title carries
 // the name for both the tooltip and the accessibility tree.
 const wideOnly = 'max-[790px]:hidden';
+
+type PillProps = {
+  icon: ReactNode;
+  label: string; // the name: the tooltip, the accessible name, and the text on a wide window
+  wide?: string; // when a wide window says something longer than the name («Готую конспект…»)
+  lead?: boolean; // the one filled button of the row
+  disabled?: boolean;
+  onClick: () => void;
+};
+
+/** Every button in the pill. Icon-only below ~790 px, so the name has to live outside the span. */
+const PillButton = ({ icon, label, wide, lead, disabled, onClick }: PillProps) => (
+  <Button
+    variant={lead ? 'default' : 'ghost'}
+    size="lg"
+    className={cn('rounded-full', lead ? 'px-4.5' : 'px-3.5')}
+    title={label}
+    aria-label={label}
+    disabled={disabled}
+    onClick={onClick}
+  >
+    {icon}
+    <span className={wideOnly}>{wide ?? label}</span>
+  </Button>
+);
 
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Job = { label: string; value?: number };
@@ -138,6 +170,7 @@ export default function App() {
   const kept = useRef(''); // the text a resumed run appends to
   const resumed = useRef(false); // a resumed run has no timestamps for the part before it, so it offers no .srt
   const pendingFrom = useRef<number | undefined>(undefined); // what the click asked for while the model loaded
+  const painted = useRef(0); // when the streaming text was last written into the panel, see PAINT_EVERY_MS
 
   // Spawned on mount, and again after a stop: terminating is the only way out of a run, and it takes the
   // loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
@@ -162,7 +195,13 @@ export default function App() {
         covered.current = offset.current + message.covered;
       }
       if (message.type === 'merging') setMerging(true);
-      if (message.type === 'partial') setTranscript(kept.current + message.text);
+      if (message.type === 'partial') {
+        // More text is still coming, so the «stitching» the estimate announced a moment ago has not started.
+        setMerging(false);
+        if (Date.now() - painted.current < PAINT_EVERY_MS) return;
+        painted.current = Date.now();
+        setTranscript(kept.current + message.text);
+      }
       if (message.type === 'result') {
         const whole = kept.current + message.text;
         setMerging(false);
@@ -511,69 +550,65 @@ export default function App() {
     </div>
   );
 
+  /** The tail every result screen shares: the text out as a copy, and the text out as a file. */
+  const takeOut = (out: { text: string; file: string; label: string; lead?: boolean; disabled?: boolean }): ReactNode => (
+    <>
+      <PillButton
+        icon={<ClipboardCopyIcon />}
+        label="Копіювати"
+        disabled={out.disabled}
+        onClick={() => copy(out.text)}
+      />
+      <PillButton
+        icon={<DownloadIcon />}
+        label={out.label}
+        lead={out.lead}
+        disabled={out.disabled}
+        onClick={() => save(window.api.saveText(out.text, out.file))}
+      />
+    </>
+  );
+
   // The lead button follows what is on screen: the text leads to a summary, the .srt leads to chapters.
   const summaryButton: ReactNode = summary ? (
-    <Button
-      size="lg"
-      className="rounded-full px-4.5"
-      title="Конспект"
-      disabled={!done}
-      onClick={() => setView('summary')}
-    >
-      <SparklesIcon /> <span className={wideOnly}>Конспект</span>
-    </Button>
+    <PillButton lead icon={<SparklesIcon />} label="Конспект" disabled={!done} onClick={() => setView('summary')} />
   ) : (
-    <Button
-      size="lg"
-      className="rounded-full px-4.5"
-      title="Опрацювати"
+    <PillButton
+      lead
+      icon={<SparklesIcon />}
+      label="Опрацювати"
+      wide={aiTask === 'summary' ? 'Готую конспект…' : undefined}
       disabled={!done || aiTask !== null}
       onClick={() => runAi('summary')}
-    >
-      <SparklesIcon /> <span className={wideOnly}>{aiTask === 'summary' ? 'Готую конспект…' : 'Опрацювати'}</span>
-    </Button>
+    />
   );
 
   const chaptersButton: ReactNode = chapters ? (
-    <Button
-      size="lg"
-      className="rounded-full px-4.5"
-      title="Таймкоди"
-      disabled={!done}
-      onClick={() => setView('chapters')}
-    >
-      <ListOrderedIcon /> <span className={wideOnly}>Таймкоди</span>
-    </Button>
+    <PillButton lead icon={<ListOrderedIcon />} label="Таймкоди" disabled={!done} onClick={() => setView('chapters')} />
   ) : (
-    <Button
-      size="lg"
-      className="rounded-full px-4.5"
-      title="Таймкоди"
+    <PillButton
+      lead
+      icon={<ListOrderedIcon />}
+      label="Таймкоди"
+      wide={aiTask === 'chapters' ? 'Готую таймкоди…' : undefined}
       disabled={!done || segments.length === 0 || aiTask !== null}
       onClick={() => runAi('chapters')}
-    >
-      <ListOrderedIcon /> <span className={wideOnly}>{aiTask === 'chapters' ? 'Готую таймкоди…' : 'Таймкоди'}</span>
-    </Button>
+    />
   );
 
-  const transcribeButton = (variant: 'default' | 'ghost'): ReactNode => (
-    <Button
-      variant={variant}
-      size="lg"
-      className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
-      title="Транскрибувати"
+  const transcribeButton = (lead: boolean): ReactNode => (
+    <PillButton
+      lead={lead}
+      icon={<AudioLinesIcon />}
+      label="Транскрибувати"
+      wide={busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : undefined}
       disabled={!file || busy || pending || modelStage === 'failed'}
       onClick={() => {
         pendingFrom.current = undefined;
         if (model) void startTranscription();
         else setPending(true);
       }}
-    >
-      <AudioLinesIcon />
-      <span className={wideOnly}>
-        {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
-      </span>
-    </Button>
+    />
   );
 
   return (
@@ -609,6 +644,7 @@ export default function App() {
                       render={
                         <button
                           type="button"
+                          aria-label="Зберегти аудіодоріжку .ogg"
                           disabled={busy}
                           onClick={() => void saveTrack()}
                           className={cn(
@@ -632,7 +668,7 @@ export default function App() {
                 : screen === 'subtitles'
                   ? `Субтитри · SRT · ${segments.length} реплік`
                   : screen === 'chapters'
-                    ? `Таймкоди · ${countLines(chapters)} розділів`
+                    ? `Таймкоди · ${countChapters(chapters)} розділів`
                     : audio
                       ? `OGG · Opus · ${formatSize(audio.size)}`
                       : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
@@ -729,6 +765,7 @@ export default function App() {
               variant="ghost"
               size="icon-xs"
               title={label}
+              aria-label={label}
               aria-pressed={theme === value}
               className={cn(
                 'size-6.5 rounded-[7px] text-muted-foreground',
@@ -755,6 +792,7 @@ export default function App() {
                   variant="ghost"
                   size="icon-xs"
                   title="Зупинити"
+                  aria-label="Зупинити"
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                   // Only a run that is decoding has something to lose; reading the file or encoding a track
                   // stops without a word.
@@ -765,7 +803,15 @@ export default function App() {
               )}
             </div>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-label={job.label}
+            {...(job.value !== undefined && {
+              'aria-valuenow': Math.round(job.value),
+              'aria-valuetext': `${Math.round(job.value)} %`,
+            })}
+          >
             {job.value === undefined ? (
               // No percentage to promise: a short bar crossing the track, instead of a full one that looks done.
               <div className="h-full w-2/5 animate-indeterminate rounded-full bg-foreground" />
@@ -796,6 +842,7 @@ export default function App() {
             modelError ? 'text-destructive' : cn('text-muted-foreground', wideOnly),
           )}
           title={fallback ?? undefined}
+          aria-live="polite"
         >
           <span>{modelError ?? status}</span>
           {modelError ? (
@@ -822,153 +869,71 @@ export default function App() {
         >
           {stage === 'pick' && (
             <>
-              {transcribeButton('default')}
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="Конвертувати у звук"
+              {transcribeButton(true)}
+              <PillButton
+                icon={<FileAudioIcon />}
+                label="Конвертувати у звук"
+                wide="Конвертувати"
                 disabled={!file}
                 onClick={convertToAudio}
-              >
-                <FileAudioIcon /> <span className={wideOnly}>Конвертувати</span>
-              </Button>
+              />
             </>
           )}
           {/* The text and the .srt are the same run, so they share one row: copy, save, swap, and what is next. */}
           {(screen === 'transcript' || onSubtitles) && (
             <>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="Копіювати"
-                disabled={!done}
-                onClick={() => copy(onSubtitles ? subtitles : transcript)}
-              >
-                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                disabled={!done}
-                onClick={() =>
-                  save(
-                    window.api.saveText(
-                      onSubtitles ? subtitles : transcript,
-                      `${baseName}${onSubtitles ? '.srt' : '.txt'}`,
-                    ),
-                  )
-                }
-                title={onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}
-              >
-                <DownloadIcon /> <span className={wideOnly}>{onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}</span>
-              </Button>
+              {takeOut({
+                text: onSubtitles ? subtitles : transcript,
+                file: `${baseName}${onSubtitles ? '.srt' : '.txt'}`,
+                label: onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt',
+                disabled: !done,
+              })}
               {resumeAt !== null && (
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  className="rounded-full px-3.5"
-                  title={`Продовжити з ${timecode(resumeAt)}`}
+                <PillButton
+                  icon={<PlayIcon />}
+                  label={`Продовжити з ${timecode(resumeAt)}`}
                   disabled={!file || busy || pending || modelStage === 'failed'}
                   onClick={() => {
                     pendingFrom.current = resumeAt;
                     if (model) void startTranscription(resumeAt);
                     else setPending(true);
                   }}
-                >
-                  <PlayIcon /> <span className={wideOnly}>Продовжити з {timecode(resumeAt)}</span>
-                </Button>
+                />
               )}
               {segments.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  className="rounded-full px-3.5"
-                  title={onSubtitles ? 'До тексту' : 'До субтитрів'}
+                <PillButton
+                  icon={onSubtitles ? <FileTextIcon /> : <CaptionsIcon />}
+                  label={onSubtitles ? 'До тексту' : 'До субтитрів'}
+                  wide={onSubtitles ? 'Текст' : 'Субтитри'}
                   disabled={!done}
                   onClick={() => setView(onSubtitles ? 'transcript' : 'subtitles')}
-                >
-                  {onSubtitles ? <FileTextIcon /> : <CaptionsIcon />}
-                  <span className={wideOnly}>{onSubtitles ? 'Текст' : 'Субтитри'}</span>
-                </Button>
+                />
               )}
               {onSubtitles ? chaptersButton : summaryButton}
             </>
           )}
           {screen === 'chapters' && (
             <>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="До субтитрів"
-                onClick={() => setView('subtitles')}
-              >
-                <ArrowLeftIcon /> <span className={wideOnly}>До субтитрів</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="Копіювати"
-                onClick={() => copy(chapters)}
-              >
-                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
-              </Button>
-              <Button
-                size="lg"
-                className="rounded-full px-4.5"
-                title="Зберегти .txt"
-                onClick={() => save(window.api.saveText(chapters, `${baseName} — таймкоди.txt`))}
-              >
-                <DownloadIcon /> <span className={wideOnly}>Зберегти .txt</span>
-              </Button>
+              <PillButton icon={<ArrowLeftIcon />} label="До субтитрів" onClick={() => setView('subtitles')} />
+              {takeOut({ text: chapters, file: `${baseName} — таймкоди.txt`, label: 'Зберегти .txt', lead: true })}
             </>
           )}
           {screen === 'summary' && (
             <>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="До транскрипту"
-                onClick={() => setView('transcript')}
-              >
-                <ArrowLeftIcon /> <span className={wideOnly}>До транскрипту</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="lg"
-                className="rounded-full px-3.5"
-                title="Копіювати"
-                onClick={() => copy(summary)}
-              >
-                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
-              </Button>
-              <Button
-                size="lg"
-                className="rounded-full px-4.5"
-                title="Зберегти .txt"
-                onClick={() => save(window.api.saveText(summary, `${baseName} — конспект.txt`))}
-              >
-                <DownloadIcon /> <span className={wideOnly}>Зберегти .txt</span>
-              </Button>
+              <PillButton icon={<ArrowLeftIcon />} label="До транскрипту" onClick={() => setView('transcript')} />
+              {takeOut({ text: summary, file: `${baseName} — конспект.txt`, label: 'Зберегти .txt', lead: true })}
             </>
           )}
           {stage === 'audio' && (
             <>
-              <Button
-                size="lg"
-                className="rounded-full px-4.5"
-                title="Зберегти .ogg"
+              <PillButton
+                lead
+                icon={<DownloadIcon />}
+                label="Зберегти .ogg"
                 disabled={!audio}
                 onClick={() => audio && save(window.api.saveAudio(audio.path, `${baseName}.ogg`))}
-              >
-                <DownloadIcon /> <span className={wideOnly}>Зберегти .ogg</span>
-              </Button>
-              {transcribeButton('ghost')}
+              />
+              {transcribeButton(false)}
             </>
           )}
         </div>
