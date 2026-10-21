@@ -810,14 +810,25 @@ if (message.type === 'partial') {
 `noUncheckedIndexedAccess` дає 7 помилок, і всі сім косметичні (групи regex у `parseClock`, `filePaths[0]` після
 перевірки довжини) — за бажанням.
 
-### 🟠 7.2 ESLint 8 + legacy `.eslintrc.json`, без `react-hooks`
+### ✅ 7.2 ESLint 8 + legacy `.eslintrc.json`, без `react-hooks`
+
+> **Зроблено 21.10.2026.** ESLint 9 + flat config (`eslint.config.mjs`) + `eslint-plugin-react-hooks` 7
+> (там уже й правила з React-компілятора). Знайшло шість речей: `ffmpegReady` читався як ref під час рендера —
+> став станом; `throw` у воркері тепер із `cause`; два ефекти (воркер на mount, відкладений клік) лишилися як є,
+> але з точковим `eslint-disable` і причиною в комментарі. `@typescript-eslint/*` замінено на `typescript-eslint`.
 
 ESLint 8.57.1 вийшов з підтримки в жовтні 2024. Головне не версія, а відсутність `eslint-plugin-react-hooks`: це
 єдиний інструмент, який ловить саме той клас помилок, що є в `App.tsx` (залежності ефектів, виклик `spawnWorker` із
 замикання, `startTranscription` у `useEffect` без залежності). Міграція на ESLint 9 + flat config + `react-hooks` —
 вечір роботи з реальною віддачею.
 
-### 🟠 7.3 Нуль тестів
+### ✅ 7.3 Нуль тестів
+
+> **Зроблено 21.10.2026.** `src/subtitles.test.ts` — 13 тестів на `node --test` без жодної залежності:
+> `timecode`, `toSrt` (включно з 999,6 мс і годинами), `toSegments` (незакритий `end`, `[null, null]`, порожній
+> текст), `parseClock`, `toTimedText` і множинні форми з `i18n.ts`. Щоб їх узагалі можна було імпортувати,
+> `toSegments` і `parseClock` переїхали в `subtitles.ts` — `worker.ts` поза воркером не завантажити, `audio.ts`
+> тягне electron. Фікстур-медіафайл не знадобився, як і передбачалося нижче.
 
 Не прошу suite. Прошу один файл на `node --test` (стандартна бібліотека, нуль залежностей) для чистих функцій, де
 баг тихий і дорогий:
@@ -841,7 +852,10 @@ ESLint 8.57.1 вийшов з підтримки в жовтні 2024. Голо�
 І окремо: `assets/test.mp4` у `.gitignore` не випадково. Відео невідомого походження в публічному репозиторії —
 це питання авторських прав на сам ролик, а не питання розміру.
 
-### 🟠 7.4 Немає CI
+### ✅ 7.4 Немає CI
+
+> **Зроблено 21.10.2026.** `.github/workflows/ci.yml`: `npm ci && tsc --noEmit && lint && test` на push у
+> main і на кожен PR. Пакування і модель у CI свідомо не їдуть — там потрібні GUI-тулчейн і відеокарта.
 
 Один workflow на `push`/`pull_request`: `npm ci && npx tsc --noEmit && npm run lint && node --test`. Для публічного
 репо це ще й сигнал контриб'юторам, що PR узагалі перевіряється.
@@ -1027,11 +1041,11 @@ Ctrl+Q і DevTools у запакованому білді. Якщо потріб
 - ✅ шлях хоста з `CLAUDE.md` · §6.6
 - ✅ **локалізація:** `src/i18n.ts`, англійська, вибір мови в налаштуваннях, мова системи за замовчуванням · §8.6
 
-### Крок 2 — процес (один вечір)
+### ✅ Крок 2 — процес (21.10.2026)
 
-- ESLint 9 + flat config + `eslint-plugin-react-hooks`, і виправити те, що воно знайде · §7.2
-- один файл на `node --test` для `subtitles.ts` і `toSegments`/`parseClock` · §7.3
-- CI: `npm ci && tsc --noEmit && lint && node --test` на push і PR · §7.4
+- ✅ ESLint 9 + flat config + `eslint-plugin-react-hooks`, і виправлено все, що воно знайшло · §7.2
+- ✅ `src/subtitles.test.ts` на `node --test` · §7.3
+- ✅ CI на push і PR · §7.4
 
 ### Крок 3 — продукт (кілька вечорів, у порядку користі)
 

@@ -1,0 +1,23 @@
+# What a pull request promises to pass. The same three commands the developer runs locally, nothing more:
+# packaging needs a GUI toolchain and the model needs a GPU, so neither belongs here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The tests are plain .ts run through node's own type stripping — no ts-node, no build step.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm test

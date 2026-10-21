@@ -8,6 +8,7 @@ import {
 } from '@huggingface/transformers';
 import { setUiLang, t, type UiLang } from './i18n';
 import { SAMPLE_RATE } from './pcm';
+import { toSegments, type Segment } from './subtitles';
 
 const MODEL_ID = 'onnx-community/whisper-large-v3-turbo';
 const CHUNK_LENGTH_S = 30;
@@ -18,9 +19,6 @@ export type Device = 'webgpu' | 'wasm';
 
 // null lets Whisper detect the language itself, per 30-second chunk.
 export type Language = 'uk' | 'en' | null;
-
-/** One timestamped piece of speech — a subtitle line, and the unit the chapter prompt reads. */
-export type Segment = { start: number; end: number; text: string };
 
 // `lang` is the interface language, for the few messages of ours that reach the screen — not the speech one.
 // It arrives with `load` only: a worker is spawned on mount and after every stop, which is often enough.
@@ -67,22 +65,6 @@ const pickWebGpu = async (): Promise<Picked> => {
   return { adapter: `WebGPU · ${label}`, dtype: fp16 ? { ...Q4, encoder_model: 'fp16' } : Q4 };
 };
 
-// The tokenizer types the pair as two numbers, but it really leaves the end (sometimes both ends) null on a
-// chunk it never closed — hence the wider type here and the normalisation below.
-type Chunk = { timestamp: (number | null)[]; text: string };
-
-const MIN_SEGMENT_S = 1.2; // what an unclosed last chunk gets, so no subtitle ends before it starts
-
-const toSegments = (chunks: Chunk[]): Segment[] =>
-  chunks.flatMap(({ timestamp: [start, end], text }, index): Segment[] => {
-    const trimmed = text.trim();
-    if (typeof start !== 'number' || trimmed === '') return [];
-
-    const nextStart = chunks[index + 1]?.timestamp[0];
-    const stop = typeof end === 'number' ? end : typeof nextStart === 'number' ? nextStart : 0;
-    return [{ start, end: stop > start ? stop : start + MIN_SEGMENT_S, text: trimmed }];
-  });
-
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 
 const post = (message: WorkerResponse): void => self.postMessage(message);
@@ -108,7 +90,7 @@ const load = async (): Promise<void> => {
       return;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      if (device === devices.at(-1)) throw new Error(`${device}: ${reason}`);
+      if (device === devices.at(-1)) throw new Error(`${device}: ${reason}`, { cause: error });
       post({ type: 'fallback', from: device, reason });
     }
   }

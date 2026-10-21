@@ -38,8 +38,8 @@ import {
   writeSetting,
 } from '@/settings';
 import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
-import { timecode, toSrt, toTimedText } from '@/subtitles';
-import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
+import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
+import type { Language, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
 const formatSize = (bytes: number, units: string[]): string => {
@@ -148,7 +148,9 @@ export default function App() {
   const [confirming, setConfirming] = useState(false); // the stop is one click away from costing the subtitles
   const [closeAsked, setCloseAsked] = useState(false); // main caught a close while a run was in flight
   const [noFfmpeg, setNoFfmpeg] = useState<string | null>(null); // why the «потрібен ffmpeg» window is open
-  const ffmpegReady = useRef(true); // asked once on startup; assume yes until main says otherwise
+  // Asked on startup and again whenever the «потрібен ffmpeg» window closes; assumed present until main says
+  // otherwise. State, not a ref: the progress block reads it to decide whether it has a percentage to show.
+  const [ffmpegReady, setFfmpegReady] = useState(true);
 
   const s = STRINGS[uiLang]; // every line this window shows
 
@@ -222,10 +224,13 @@ export default function App() {
     worker.postMessage({ type: 'load', lang: uiLang } satisfies WorkerRequest);
   };
 
+  // Mount only, and deliberately: one worker per window, and spawnWorker is re-created on every render. Its
+  // setState calls are how a loading model reaches the screen — that is this effect's job, not a cascade.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     spawnWorker();
 
-    void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
+    void window.api.hasFfmpeg().then(setFfmpegReady);
     window.api.onAudioProgress(setConversion);
     window.api.onCloseAsk(() => setCloseAsked(true));
     window.api.onGpuGone((message) => {
@@ -234,6 +239,9 @@ export default function App() {
     });
 
     return () => workerRef.current?.terminate();
+    // Mount only: a running worker is not re-spawned because the window changed language, and the listeners
+    // above are registered once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -336,7 +344,7 @@ export default function App() {
    * knows the containers Chromium can demux, which is enough for the short clips this case is about.
    */
   const readSamples = async (path: string, from?: number): Promise<Float32Array> => {
-    if (ffmpegReady.current) return window.api.extractAudio(path, from);
+    if (ffmpegReady) return window.api.extractAudio(path, from);
 
     const samples = await decodeInBrowser(await window.api.readBytes(path));
     // ffmpeg seeks before decoding; here the whole file is already decoded, so a resumed run just skips ahead.
@@ -368,7 +376,7 @@ export default function App() {
       // A killed ffmpeg rejects like a broken one. With no ffmpeg at all, a failure here means the browser
       // could not read this particular file, and the answer to that is the same window as a missing binary.
       if (!stopped.current) {
-        if (ffmpegReady.current) failWith(error);
+        if (ffmpegReady) failWith(error);
         else setNoFfmpeg(s.ffmpegDialog.cannotRead);
       }
       setProgress(null);
@@ -379,7 +387,7 @@ export default function App() {
 
   const convertToAudio = async (): Promise<void> => {
     if (!file) return;
-    if (!ffmpegReady.current) {
+    if (!ffmpegReady) {
       setNoFfmpeg(s.ffmpegDialog.forTrack);
       return;
     }
@@ -406,7 +414,7 @@ export default function App() {
    */
   const saveTrack = async (): Promise<void> => {
     if (!file) return;
-    if (!ffmpegReady.current) {
+    if (!ffmpegReady) {
       setNoFfmpeg(s.ffmpegDialog.forTrack);
       return;
     }
@@ -464,8 +472,13 @@ export default function App() {
   // Loading the model takes a few seconds on every start — let the click wait for it instead of the person.
   useEffect(() => {
     if (!pending || model === null || busy) return;
+    // The wait is over, and clearing the flag is what keeps this effect from firing again.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPending(false);
     void startTranscription(pendingFrom.current);
+    // startTranscription is a new function on every render; the flag above, not its identity, decides when
+    // this runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, model, busy]);
 
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
@@ -475,7 +488,7 @@ export default function App() {
     ? { label: s.job.audioFile, value: conversion }
     : converting
       // The browser decoder reports nothing on its way; only ffmpeg has a percentage to show.
-      ? { label: s.job.readingAudio, value: ffmpegReady.current ? conversion : undefined }
+      ? { label: s.job.readingAudio, value: ffmpegReady ? conversion : undefined }
       : merging
         ? { label: s.job.merging }
         : progress !== null
@@ -1015,7 +1028,7 @@ export default function App() {
         // Re-ask on the way out: ffmpeg may have been installed while this window was open.
         onClose={() => {
           setNoFfmpeg(null);
-          void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
+          void window.api.hasFfmpeg().then(setFfmpegReady);
         }}
       />
       <SettingsDialog

@@ -1,4 +1,13 @@
-import type { Segment } from './worker';
+/** One timestamped piece of speech — a subtitle line, and the unit the chapter prompt reads. */
+export type Segment = { start: number; end: number; text: string };
+
+/**
+ * A pair of timestamps as the tokenizer leaves it. It types them as two numbers, but it really leaves the end
+ * (sometimes both ends) null on a chunk it never closed — hence the wider type here.
+ */
+export type Chunk = { timestamp: (number | null)[]; text: string };
+
+const MIN_SEGMENT_S = 1.2; // what an unclosed last chunk gets, so no subtitle ends before it starts
 
 const pad = (value: number): string => String(value).padStart(2, '0');
 
@@ -20,6 +29,23 @@ const srtTime = (seconds: number): string => {
 /** SubRip, the format YouTube, Premiere and VLC all take. Segments come straight from Whisper's own boundaries. */
 export const toSrt = (segments: Segment[]): string =>
   `${segments.map(({ start, end, text }, index) => `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}`).join('\n\n')}\n`;
+
+/** Whisper's own chunks, normalised into segments: no open ends, no empty lines. */
+export const toSegments = (chunks: Chunk[]): Segment[] =>
+  chunks.flatMap(({ timestamp: [start, end], text }, index): Segment[] => {
+    const trimmed = text.trim();
+    if (typeof start !== 'number' || trimmed === '') return [];
+
+    const nextStart = chunks[index + 1]?.timestamp[0];
+    const stop = typeof end === 'number' ? end : typeof nextStart === 'number' ? nextStart : 0;
+    return [{ start, end: stop > start ? stop : start + MIN_SEGMENT_S, text: trimmed }];
+  });
+
+/** `00:01:23.45` → seconds. The shape ffmpeg prints in its `Duration:` banner. */
+export const parseClock = (clock: string): number => {
+  const [hours, minutes, seconds] = clock.split(':').map(Number);
+  return hours * 3600 + minutes * 60 + seconds;
+};
 
 /** What the chapter prompt reads: one `[timecode] речення` per line. */
 export const toTimedText = (segments: Segment[]): string =>

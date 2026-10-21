@@ -5,6 +5,7 @@ import { app } from 'electron';
 import type { ExportedAudio } from './preload';
 import { t } from './i18n';
 import { SAMPLE_RATE } from './pcm';
+import { parseClock } from './subtitles';
 
 const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 
@@ -40,11 +41,6 @@ export const ffmpegBinary = (): string | null => {
 };
 
 export type OnProgress = (percent: number) => void;
-
-const parseClock = (clock: string): number => {
-  const [hours, minutes, seconds] = clock.split(':').map(Number);
-  return hours * 3600 + minutes * 60 + seconds;
-};
 
 /**
  * Runs ffmpeg to completion; stdout goes to `onData`, a non-zero exit becomes an error carrying stderr's tail.

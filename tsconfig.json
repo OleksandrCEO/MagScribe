@@ -6,6 +6,10 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "strict": true,
+    // Vite emits the bundle; tsc is only the typechecker here. Both together let the one test file import
+    // `./subtitles.ts` by its real name, which is what node needs to run it without a loader.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "sourceMap": true,
