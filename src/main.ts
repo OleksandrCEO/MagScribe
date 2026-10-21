@@ -18,7 +18,8 @@ import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { cancelFfmpeg, discardExport, exportAudio, extractAudio, isExport } from './audio';
-import { AI_TASKS, type AiTask } from './summary';
+import { MAX_PROMPT, type AiTask } from './prompts';
+import { AI_TASKS } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -278,12 +279,16 @@ ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
   notification.show();
 });
 
-ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown): Promise<string> => {
-  const run = AI_TASKS[task as AiTask] as ((input: string) => Promise<string>) | undefined;
+ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: unknown): Promise<string> => {
+  const run = AI_TASKS[task as AiTask] as typeof AI_TASKS[AiTask] | undefined;
   if (!run) throw new Error(`ai:run: unknown task ${String(task)}`);
   if (typeof transcript !== 'string' || transcript.trim().length === 0) throw new Error('ai:run needs a transcript');
 
-  return run(transcript);
+  // The prompt comes from a text box in the settings window: anything odd falls back to the built-in one.
+  const edited = typeof prompt === 'string' && prompt.trim().length > 0 ? prompt.trim() : undefined;
+  if (edited !== undefined && edited.length > MAX_PROMPT) throw new Error('ai:run: prompt is too long');
+
+  return run(transcript, edited);
 });
 
 // This method will be called when Electron has finished

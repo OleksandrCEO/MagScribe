@@ -19,8 +19,11 @@ const api = {
     ipcRenderer.on('audio:progress', (_event, percent: unknown) => listener(Number(percent)));
   },
   // Both run the local claude CLI in main: a summary of the plain transcript, chapters of the timestamped one.
-  summarize: (transcript: string): Promise<string> => ipcRenderer.invoke('ai:run', 'summary', transcript),
-  chapters: (timedTranscript: string): Promise<string> => ipcRenderer.invoke('ai:run', 'chapters', timedTranscript),
+  // `prompt` is whatever the settings window holds; main falls back to the built-in instruction without one.
+  summarize: (transcript: string, prompt: string): Promise<string> =>
+    ipcRenderer.invoke('ai:run', 'summary', transcript, prompt),
+  chapters: (timedTranscript: string, prompt: string): Promise<string> =>
+    ipcRenderer.invoke('ai:run', 'chapters', timedTranscript, prompt),
   // Both return false when the user cancels the save dialog.
   saveText: (text: string, suggestedName: string): Promise<boolean> =>
     ipcRenderer.invoke('file:save', text, suggestedName),

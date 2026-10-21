@@ -25,7 +25,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import { AboutDialog, SettingsDialog, readSetting, writeSetting } from '@/settings';
+import type { Prompts } from '@/prompts';
+import { AboutDialog, SettingsDialog, readPrompts, readSetting, writePrompts, writeSetting } from '@/settings';
 import { toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -90,6 +91,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'system'));
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
+  const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the claude CLI gets
   const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
@@ -176,6 +178,8 @@ export default function App() {
     writeSetting(THEME_KEY, theme);
     window.api.setTheme(theme);
   }, [theme]);
+
+  useEffect(() => writePrompts(prompts), [prompts]);
 
   const busy = converting || progress !== null || exporting;
 
@@ -298,7 +302,9 @@ export default function App() {
     setAiTask(task);
     try {
       const text =
-        task === 'summary' ? await window.api.summarize(transcript) : await window.api.chapters(toTimedText(segments));
+        task === 'summary'
+          ? await window.api.summarize(transcript, prompts.summary)
+          : await window.api.chapters(toTimedText(segments), prompts.chapters);
       if (task === 'summary') setSummary(text);
       else setChapters(text);
       setView(task);
@@ -834,7 +840,12 @@ export default function App() {
         </TooltipProvider>
       </div>
 
-      <SettingsDialog open={dialog === 'settings'} onClose={() => setDialog(null)} />
+      <SettingsDialog
+        open={dialog === 'settings'}
+        prompts={prompts}
+        onPrompts={setPrompts}
+        onClose={() => setDialog(null)}
+      />
       <AboutDialog
         open={dialog === 'about'}
         engine={model && `${model.adapter} · ${model.encoder}`}

@@ -1,6 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
 // localStorage is keyed per origin and survives restarts. It can still throw (blocked storage), and a setting
@@ -20,6 +22,24 @@ export const writeSetting = (key: string, value: string): void => {
   } catch {
     // see above: a setting that does not survive a restart is not an error
   }
+};
+
+/** Free text, unlike the settings above it, so there is no list of allowed values to check against. */
+const readStored = (key: string, fallback: string): string => {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+export const readPrompts = (): Prompts =>
+  Object.fromEntries(
+    PROMPT_FIELDS.map(({ task, key }) => [task, readStored(key, DEFAULT_PROMPTS[task])]),
+  ) as Prompts;
+
+export const writePrompts = (prompts: Prompts): void => {
+  for (const { task, key } of PROMPT_FIELDS) writeSetting(key, prompts[task]);
 };
 
 type ModalProps = { open: boolean; title: string; onClose: () => void; children: ReactNode };
@@ -43,6 +63,7 @@ function Modal({ open, title, onClose, children }: ModalProps) {
       onClick={(event) => event.target === ref.current && onClose()}
       className={cn(
         'm-auto w-110 max-w-[calc(100%-3rem)] rounded-2xl border bg-card p-0 text-foreground',
+        'max-h-[85vh] overflow-y-auto [scrollbar-width:thin]',
         'shadow-[0_24px_64px_-24px_rgb(0_0_0/0.5)] backdrop:bg-black/35',
       )}
     >
@@ -65,14 +86,43 @@ function Modal({ open, title, onClose, children }: ModalProps) {
   );
 }
 
-/** Empty on purpose: the window is here, its contents arrive with the engine picker (docs/concept.md). */
-export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+type SettingsProps = { open: boolean; prompts: Prompts; onPrompts: (prompts: Prompts) => void; onClose: () => void };
+
+export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsProps) {
   return (
     <Modal open={open} title="Налаштування" onClose={onClose}>
-      <p className="text-[13px] leading-[1.6] text-muted-foreground">
-        Поки що порожньо. Сюди переїде вибір рушія: розшифровувати локальною моделлю чи хмарним сервісом за
-        ключем, і чим робити конспект і таймкоди.
-      </p>
+      <div className="flex flex-col gap-4">
+        <p className="text-xs leading-[1.55] text-muted-foreground">
+          Інструкції, які отримує модель. Типові написані нами — міняй, якщо потрібен інший формат, інша довжина
+          чи інша мова відповіді. Порожнє поле повертає типову.
+        </p>
+
+        {PROMPT_FIELDS.map(({ task, label }) => (
+          <div key={task} className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium">{label}</span>
+              {prompts[task] !== DEFAULT_PROMPTS[task] && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => onPrompts({ ...prompts, [task]: DEFAULT_PROMPTS[task] })}
+                >
+                  Повернути типову
+                </button>
+              )}
+            </div>
+            <Textarea
+              value={prompts[task]}
+              spellCheck={false}
+              onChange={(event) => onPrompts({ ...prompts, [task]: event.target.value })}
+              className={cn(
+                'field-sizing-fixed h-44 resize-none text-[12.5px] leading-[1.5] md:text-[12.5px]',
+                '[scrollbar-width:thin] dark:bg-background',
+              )}
+            />
+          </div>
+        ))}
+      </div>
     </Modal>
   );
 }
