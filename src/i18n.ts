@@ -1,0 +1,394 @@
+/**
+ * Every line the app shows, in both languages it speaks. No framework: two objects and `en: typeof uk`, which
+ * makes a forgotten key a type error instead of a Ukrainian word in an English window.
+ *
+ * Keep this module free of node and React imports — main, the worker and the renderer all read it.
+ *
+ * Markup inside a line: `*emphasis*` and `` `code` ``, the two things the dialogs need. `rich()` in settings.tsx
+ * renders them, so a whole sentence stays one translatable string instead of three fragments in a fixed order.
+ *
+ * The prompts are not here on purpose: they are instructions for the model, in English for both languages, and
+ * the answer follows the recording rather than the interface — see prompts.ts.
+ */
+
+export type UiLang = 'uk' | 'en';
+
+export const UI_LANGS: readonly UiLang[] = ['uk', 'en'];
+
+/** What the language picker in the settings window says — each in its own language, as every list of them does. */
+export const LANG_NAMES: Record<UiLang, string> = { uk: 'Українська', en: 'English' };
+
+/** A BCP 47 tag (`navigator.language`, `app.getLocale()`) → the closest language we have. */
+export const pickUiLang = (tag: string): UiLang => (tag.toLowerCase().startsWith('uk') ? 'uk' : 'en');
+
+/** 1 слово · 2 слова · 5 слів. Ukrainian needs all three, and the one-liner is cheaper than reading «1 слів». */
+const plural = (n: number, one: string, few: string, many: string): string =>
+  n % 10 === 1 && n % 100 !== 11
+    ? one
+    : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)
+      ? few
+      : many;
+
+const uk = {
+  sizes: ['Б', 'КБ', 'МБ', 'ГБ'],
+  words: (n: number): string => `${n} ${plural(n, 'слово', 'слова', 'слів')}`,
+  cues: (n: number): string => `${n} ${plural(n, 'репліка', 'репліки', 'реплік')}`,
+  chapters: (n: number): string => `${n} ${plural(n, 'розділ', 'розділи', 'розділів')}`,
+
+  ui: {
+    settings: 'Налаштування',
+    about: 'Про MagScribe',
+    startOver: 'Почати заново',
+    close: 'Закрити',
+    stop: 'Зупинити',
+    retry: 'Спробувати ще раз',
+    dropTitle: 'Перетягни відео або аудіо',
+    dropHint: 'MP4, MKV, MOV, MP3, WAV та інші',
+    dropPick: 'Вибрати файл',
+    saveTrack: 'Зберегти аудіодоріжку .ogg',
+    audioReady: 'Аудіодоріжку витягнуто. Збережи її або запусти транскрибацію.',
+    transcribedIn: (time: string, words: string): string => ` · розшифровано за ${time} · ${words}`,
+  },
+
+  theme: { light: 'Світла', system: 'Як у системі', dark: 'Темна' },
+
+  /** The language of the recording, not of the interface: three bare words with a tooltip each. */
+  speech: {
+    auto: 'Авто',
+    autoHint: 'Мова розпізнавання — визначити автоматично',
+    ukHint: 'Мова розпізнавання — українська',
+    enHint: 'Мова розпізнавання — англійська',
+  },
+
+  screen: {
+    transcript: 'Текст',
+    subtitles: 'Субтитри',
+    summary: 'Конспект',
+    chapters: 'Таймкоди',
+    audio: 'Аудіо',
+    conversion: 'Конвертація',
+    transcription: 'Транскрибація',
+  },
+
+  job: {
+    audioFile: 'Готую аудіофайл',
+    readingAudio: 'Читаю звук із файлу',
+    merging: 'Збираю текст і таймкоди',
+    transcribing: 'Транскрибація',
+    summary: 'Готую конспект',
+    chapters: 'Готую таймкоди',
+    downloading: 'Завантаження моделі',
+    preparing: 'Готую модель до роботи — перший запуск триває кілька хвилин',
+  },
+
+  status: {
+    awake: 'Машина не засне до завершення',
+    done: 'Готово',
+    modelReady: 'Модель готова',
+    preparing: 'Готую модель',
+    downloading: 'Завантажую модель',
+  },
+
+  toast: {
+    copied: 'Скопійовано',
+    clipboardRefused: 'Буфер обміну не прийняв текст',
+    saved: 'Збережено',
+    stopped: 'Зупинено',
+    stoppedAt: (time: string): string => `Зупинено на ${time} — можна продовжити`,
+    transcribed: (words: string): string => `Транскрибація завершена — ${words}`,
+  },
+
+  pill: {
+    copy: 'Копіювати',
+    saveTxt: 'Зберегти .txt',
+    saveSrt: 'Зберегти .srt',
+    saveOgg: 'Зберегти .ogg',
+    resumeFrom: (time: string): string => `Продовжити з ${time}`,
+    toText: 'До тексту',
+    text: 'Текст',
+    toSubtitles: 'До субтитрів',
+    subtitles: 'Субтитри',
+    toTranscript: 'До транскрипту',
+    transcribe: 'Транскрибувати',
+    transcribing: 'Транскрибую…',
+    waitingForModel: 'Чекаю на модель…',
+    convert: 'Конвертувати у звук',
+    convertShort: 'Конвертувати',
+    summary: 'Конспект',
+    process: 'Опрацювати',
+    processing: 'Готую конспект…',
+    chapters: 'Таймкоди',
+    chaptering: 'Готую таймкоди…',
+  },
+
+  /** What a saved file is called; the base name is the recording's own. */
+  file: {
+    chapters: (base: string): string => `${base} — таймкоди.txt`,
+    summary: (base: string): string => `${base} — конспект.txt`,
+  },
+
+  stopDialog: {
+    title: 'Зупинити транскрибацію?',
+    cancel: 'Хай працює',
+    confirm: 'Зупинити',
+    body: [
+      'Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.',
+      'Але субтитри *.srt* для цього файлу вже не вийдуть: таймкоди складаються в одне ціле лише наприкінці ' +
+        'повного прогону.',
+    ],
+  },
+
+  closeDialog: {
+    title: 'Закрити застосунок?',
+    cancel: 'Хай працює',
+    confirm: 'Закрити',
+    body: [
+      'Робота ще триває.',
+      'Якщо закрити зараз, усе розшифроване *зникне без сліду* — на відміну від зупинки, тут нічого не ' +
+        'лишається на екрані.',
+    ],
+  },
+
+  ffmpegDialog: {
+    title: 'Потрібен ffmpeg',
+    cancel: 'Зрозуміло',
+    confirm: 'Відкрити сайт ffmpeg',
+    cannotRead: 'Цей файл не вдалося прочитати — для нього потрібен ffmpeg.',
+    forTrack: 'Щоб зберегти аудіодоріжку окремим файлом, потрібен ffmpeg.',
+    body: (reason: string): string[] => [
+      `${reason} Утиліта *ffmpeg* у системі не знайшлася.`,
+      'Коротке відео чи аудіо MagScribe розшифрує й без неї — прочитає сам, декодером браузера. Але довгі ' +
+        'файли, контейнери AVI та WMV і збереження аудіодоріжки без ffmpeg не вийдуть.',
+      'У Linux вона майже завжди є в пакетах дистрибутива (`ffmpeg`); для Windows і macOS збірки лежать на ' +
+        'сайті проєкту.',
+    ],
+  },
+
+  settings: {
+    language: 'Мова інтерфейсу',
+    promptsHint:
+      'Інструкції, які отримує модель. Можна замінити на власні, або підкоригувати за бажанням. Порожнє поле ' +
+      'підставить промпт за замовчуванням.',
+    reset: 'Скинути',
+    // Keyed by task, so prompts.ts holds only the storage keys and the settings window needs no mapping.
+    prompt: { summary: 'Конспект — кнопка «Опрацювати»', chapters: 'Таймкоди — для формування розділів' },
+  },
+
+  /** `version` is the build, `engine` the adapter line, or null while the model is still loading. */
+  about: (version: string, engine: string | null): string[] => [
+    `*MagScribe ${version}* — транскрибація відео й аудіо: текст, субтитри .srt і таймкоди розділів.`,
+    `Зараз розшифровує Whisper large-v3-turbo на цій машині${engine ? ` *(${engine})*` : ''}, а конспект і ` +
+      'таймкоди пише команда `claude` — тобто транскрипт для них іде в Anthropic.',
+    'Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.',
+    'Модель — *openai/whisper-large-v3-turbo* (MIT) у ONNX-конверсії onnx-community; звук читає системний ' +
+      '`ffmpeg`. Умови сторонніх компонентів — у файлі *THIRD-PARTY-LICENSES.md* поруч із застосунком. Сам ' +
+      'MagScribe — під MIT.',
+  ],
+
+  /** Names in the system's own open dialog. */
+  filter: { video: 'Відео', audio: 'Аудіо', all: 'Усі файли' },
+
+  error: {
+    ffmpegMissing: 'Не знайдено ffmpeg. Встанови його — без нього не вийде ні прочитати звук, ні зберегти аудіо.',
+    ffmpegBusy: 'Конвертація вже триває',
+    noAudioTrack: 'У файлі немає звукової доріжки',
+    claudeMissing: 'Команду claude не знайдено. Встанови Claude Code CLI і перевір, що вона є у PATH.',
+    claudeTooBig: 'Відповідь claude не вмістилася у 8 МБ',
+    claudeTimeout: (seconds: number): string => `claude не вклався у ${seconds} секунд`,
+    adapterNull: 'requestAdapter() повернув null',
+    unknownAdapter: 'невідомий адаптер',
+    softwareAdapter: (label: string): string => `програмний адаптер «${label}» замість відеокарти`,
+    modelNotLoaded: 'Модель ще не завантажена',
+    workerFailed: 'Воркер не запустився',
+    gpuGone: (reason: string, code: number): string => `GPU-процес завершився (${reason}, код ${code})`,
+    restartApp: (message: string): string => `${message}. Перезапусти застосунок.`,
+    fallback: (from: string, reason: string): string => `${from} недоступний: ${reason}`,
+  },
+};
+
+const en: typeof uk = {
+  sizes: ['B', 'KB', 'MB', 'GB'],
+  words: (n: number): string => `${n} word${n === 1 ? '' : 's'}`,
+  cues: (n: number): string => `${n} cue${n === 1 ? '' : 's'}`,
+  chapters: (n: number): string => `${n} chapter${n === 1 ? '' : 's'}`,
+
+  ui: {
+    settings: 'Settings',
+    about: 'About MagScribe',
+    startOver: 'Start over',
+    close: 'Close',
+    stop: 'Stop',
+    retry: 'Try again',
+    dropTitle: 'Drop a video or an audio file',
+    dropHint: 'MP4, MKV, MOV, MP3, WAV and others',
+    dropPick: 'Choose a file',
+    saveTrack: 'Save the audio track as .ogg',
+    audioReady: 'The audio track is out. Save it, or start the transcription.',
+    transcribedIn: (time: string, words: string): string => ` · transcribed in ${time} · ${words}`,
+  },
+
+  theme: { light: 'Light', system: 'Follow the system', dark: 'Dark' },
+
+  speech: {
+    auto: 'Auto',
+    autoHint: 'Speech language — detect it automatically',
+    ukHint: 'Speech language — Ukrainian',
+    enHint: 'Speech language — English',
+  },
+
+  screen: {
+    transcript: 'Text',
+    subtitles: 'Subtitles',
+    summary: 'Summary',
+    chapters: 'Chapters',
+    audio: 'Audio',
+    conversion: 'Conversion',
+    transcription: 'Transcription',
+  },
+
+  job: {
+    audioFile: 'Preparing the audio file',
+    readingAudio: 'Reading the sound out of the file',
+    merging: 'Putting the text and the timecodes together',
+    transcribing: 'Transcription',
+    summary: 'Writing the summary',
+    chapters: 'Writing the chapters',
+    downloading: 'Downloading the model',
+    preparing: 'Getting the model ready — the first run takes a few minutes',
+  },
+
+  status: {
+    awake: 'The machine stays awake until this is done',
+    done: 'Done',
+    modelReady: 'The model is ready',
+    preparing: 'Getting the model ready',
+    downloading: 'Downloading the model',
+  },
+
+  toast: {
+    copied: 'Copied',
+    clipboardRefused: 'The clipboard refused the text',
+    saved: 'Saved',
+    stopped: 'Stopped',
+    stoppedAt: (time: string): string => `Stopped at ${time} — you can carry on from there`,
+    transcribed: (words: string): string => `Transcription finished — ${words}`,
+  },
+
+  pill: {
+    copy: 'Copy',
+    saveTxt: 'Save .txt',
+    saveSrt: 'Save .srt',
+    saveOgg: 'Save .ogg',
+    resumeFrom: (time: string): string => `Carry on from ${time}`,
+    toText: 'To the text',
+    text: 'Text',
+    toSubtitles: 'To the subtitles',
+    subtitles: 'Subtitles',
+    toTranscript: 'To the transcript',
+    transcribe: 'Transcribe',
+    transcribing: 'Transcribing…',
+    waitingForModel: 'Waiting for the model…',
+    convert: 'Convert to sound',
+    convertShort: 'Convert',
+    summary: 'Summary',
+    process: 'Process',
+    processing: 'Writing the summary…',
+    chapters: 'Chapters',
+    chaptering: 'Writing the chapters…',
+  },
+
+  file: {
+    chapters: (base: string): string => `${base} — chapters.txt`,
+    summary: (base: string): string => `${base} — summary.txt`,
+  },
+
+  stopDialog: {
+    title: 'Stop the transcription?',
+    cancel: 'Let it run',
+    confirm: 'Stop',
+    body: [
+      'Everything transcribed so far stays, and the run can carry on from where it stopped.',
+      'But *.srt* subtitles for this file are off the table: the timecodes are only put together at the very ' +
+        'end of a full run.',
+    ],
+  },
+
+  closeDialog: {
+    title: 'Close the app?',
+    cancel: 'Let it run',
+    confirm: 'Close',
+    body: [
+      'Work is still in progress.',
+      'Closing now makes everything transcribed *disappear without a trace* — unlike stopping, which leaves ' +
+        'it on screen.',
+    ],
+  },
+
+  ffmpegDialog: {
+    title: 'ffmpeg is needed',
+    cancel: 'Understood',
+    confirm: 'Open the ffmpeg site',
+    cannotRead: 'This file could not be read — it needs ffmpeg.',
+    forTrack: 'Saving the audio track as a separate file needs ffmpeg.',
+    body: (reason: string): string[] => [
+      `${reason} The *ffmpeg* tool was not found on this machine.`,
+      'A short video or audio file MagScribe transcribes without it — the browser decoder reads those. Long ' +
+        'files, AVI and WMV containers and saving the audio track all need ffmpeg.',
+      'On Linux it is almost always in the distribution packages (`ffmpeg`); for Windows and macOS the builds ' +
+        'are on the project site.',
+    ],
+  },
+
+  settings: {
+    language: 'Interface language',
+    promptsHint:
+      'The instructions the model gets. Replace them with your own, or tweak them as you like. An empty field ' +
+      'falls back to the built-in prompt.',
+    reset: 'Reset',
+    prompt: { summary: 'Summary — the «Process» button', chapters: 'Chapters — for building the sections' },
+  },
+
+  about: (version: string, engine: string | null): string[] => [
+    `*MagScribe ${version}* — transcription of video and audio: text, .srt subtitles and chapter timecodes.`,
+    `Right now Whisper large-v3-turbo does the transcription on this machine${engine ? ` *(${engine})*` : ''}, ` +
+      'while the summary and the chapters are written by the `claude` command — so the transcript goes to ' +
+      'Anthropic for those two.',
+    'A choice of engine for both steps — local or cloud — is coming to the settings.',
+    'The model is *openai/whisper-large-v3-turbo* (MIT) in the ONNX conversion by onnx-community; the sound is ' +
+      'read by the system `ffmpeg`. The terms of the third-party components are in *THIRD-PARTY-LICENSES.md* ' +
+      'next to the app. MagScribe itself is under MIT.',
+  ],
+
+  filter: { video: 'Video', audio: 'Audio', all: 'All files' },
+
+  error: {
+    ffmpegMissing: 'ffmpeg was not found. Install it — without it the sound cannot be read, nor the audio saved.',
+    ffmpegBusy: 'A conversion is already running',
+    noAudioTrack: 'The file has no audio track',
+    claudeMissing: 'The claude command was not found. Install the Claude Code CLI and check that it is on PATH.',
+    claudeTooBig: 'The answer from claude did not fit into 8 MB',
+    claudeTimeout: (seconds: number): string => `claude did not finish within ${seconds} seconds`,
+    adapterNull: 'requestAdapter() returned null',
+    unknownAdapter: 'unknown adapter',
+    softwareAdapter: (label: string): string => `software adapter «${label}» instead of a graphics card`,
+    modelNotLoaded: 'The model is not loaded yet',
+    workerFailed: 'The worker did not start',
+    gpuGone: (reason: string, code: number): string => `The GPU process exited (${reason}, code ${code})`,
+    restartApp: (message: string): string => `${message}. Restart the app.`,
+    fallback: (from: string, reason: string): string => `${from} is unavailable: ${reason}`,
+  },
+};
+
+export type Strings = typeof uk;
+
+export const STRINGS: Record<UiLang, Strings> = { uk, en };
+
+// Main and the worker have no React to re-render, so they read the language off the module: main is told by the
+// window over `lang:set`, the worker gets it with its `load` message. The renderer reads STRINGS directly.
+let current: UiLang = 'uk';
+
+export const setUiLang = (lang: UiLang): void => {
+  current = lang;
+};
+
+export const t = (): Strings => STRINGS[current];

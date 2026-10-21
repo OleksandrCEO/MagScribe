@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { UiLang } from './i18n';
 
 export type SelectedFile = { path: string; name: string; size: number };
 export type ExportedAudio = { path: string; size: number }; // an OGG/Opus file in the temp folder, see audio.ts
@@ -45,6 +46,8 @@ const api = {
   setWorking: (working: boolean): void => ipcRenderer.send('work:working', working),
   // Main flips nativeTheme, so prefers-color-scheme (and with it the whole CSS theme) follows the choice.
   setTheme: (theme: Theme): void => ipcRenderer.send('theme:set', theme),
+  // The window owns the interface language; main needs it for the open dialog and for its own error messages.
+  setLang: (lang: UiLang): void => ipcRenderer.send('lang:set', lang),
   notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
   // Main asks before closing a window that is still working; the window answers with its own dialog.
   onCloseAsk: (listener: () => void): void => {

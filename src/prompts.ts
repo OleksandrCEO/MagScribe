@@ -45,10 +45,10 @@ export type Prompts = Record<AiTask, string>;
 
 export const DEFAULT_PROMPTS: Prompts = { summary: SUMMARY_PROMPT, chapters: CHAPTERS_PROMPT };
 
-/** Where an edited prompt is kept, and what the settings window calls it. */
-export const PROMPT_FIELDS: { task: AiTask; key: string; label: string }[] = [
-  { task: 'summary', key: 'prompt.summary', label: 'Конспект — кнопка «Опрацювати»' },
-  { task: 'chapters', key: 'prompt.chapters', label: 'Таймкоди — для формування розділів' },
+/** Where an edited prompt is kept. What the settings window calls it lives in i18n.ts, keyed by the same task. */
+export const PROMPT_FIELDS: { task: AiTask; key: string }[] = [
+  { task: 'summary', key: 'prompt.summary' },
+  { task: 'chapters', key: 'prompt.chapters' },
 ];
 
 // A prompt longer than this is a mistake, not a prompt; main refuses it and falls back to the default.

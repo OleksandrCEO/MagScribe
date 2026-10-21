@@ -5,7 +5,8 @@
 
 > **In English.** MagScribe is a local-first desktop app that transcribes video and audio with Whisper
 > large-v3-turbo running on your own GPU (WebGPU, wasm fallback). It produces plain text, SubRip subtitles and
-> YouTube-style chapter timecodes. The interface is in Ukrainian only for now. Linux x86_64; see
+> YouTube-style chapter timecodes. The interface speaks Ukrainian and English — it opens in the language of
+> the operating system, and the settings window switches it. Linux x86_64; see
 > [What leaves your machine](#що-виходить-із-твоєї-машини) for the one feature that is not local.
 
 ## Що воно робить
@@ -14,6 +15,9 @@
 - із того ж прогону — субтитри `.srt` із таймкодами;
 - за бажанням — конспект і список розділів («00:00 — Назва») через локальну команду `claude`;
 - окремо — витягує аудіодоріжку в OGG/Opus (контейнер, який Telegram грає як голосове).
+
+Інтерфейс — українською або англійською: при першому запуску береться мова системи, далі перемикається в
+налаштуваннях.
 
 Текст, субтитри й таймкоди можна виправити просто у вікні перед збереженням: Whisper плутає імена, а назви
 розділів інколи варто переписати людською мовою.

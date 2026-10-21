@@ -6,6 +6,7 @@ import {
   type AutomaticSpeechRecognitionPipeline,
   type ProgressInfo,
 } from '@huggingface/transformers';
+import { setUiLang, t, type UiLang } from './i18n';
 import { SAMPLE_RATE } from './pcm';
 
 const MODEL_ID = 'onnx-community/whisper-large-v3-turbo';
@@ -21,7 +22,11 @@ export type Language = 'uk' | 'en' | null;
 /** One timestamped piece of speech — a subtitle line, and the unit the chapter prompt reads. */
 export type Segment = { start: number; end: number; text: string };
 
-export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Float32Array; language: Language };
+// `lang` is the interface language, for the few messages of ours that reach the screen — not the speech one.
+// It arrives with `load` only: a worker is spawned on mount and after every stop, which is often enough.
+export type WorkerRequest =
+  | { type: 'load'; lang: UiLang }
+  | { type: 'transcribe'; audio: Float32Array; language: Language };
 
 export type WorkerResponse =
   | { type: 'download'; progress: number } // model download, 0..100
@@ -50,12 +55,12 @@ const SOFTWARE_ADAPTER = /swiftshader|llvmpipe|lavapipe|warp/i;
 
 const pickWebGpu = async (): Promise<Picked> => {
   const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) throw new Error('requestAdapter() повернув null');
+  if (!adapter) throw new Error(t().error.adapterNull);
 
   const { vendor, architecture, description, isFallbackAdapter } = adapter.info;
-  const label = [vendor, architecture].filter(Boolean).join(' ') || description || 'невідомий адаптер';
+  const label = [vendor, architecture].filter(Boolean).join(' ') || description || t().error.unknownAdapter;
   if (isFallbackAdapter || SOFTWARE_ADAPTER.test(`${vendor} ${architecture} ${description}`)) {
-    throw new Error(`програмний адаптер «${label}» замість відеокарти`);
+    throw new Error(t().error.softwareAdapter(label));
   }
 
   const fp16 = adapter.features.has('shader-f16');
@@ -110,7 +115,7 @@ const load = async (): Promise<void> => {
 };
 
 const transcribe = async (audio: Float32Array, language: Language): Promise<void> => {
-  if (!transcriber) throw new Error('Модель ще не завантажена');
+  if (!transcriber) throw new Error(t().error.modelNotLoaded);
 
   const duration = audio.length / SAMPLE_RATE;
 
@@ -165,6 +170,7 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
+  if (request.type === 'load') setUiLang(request.lang);
   const done = request.type === 'load' ? load() : transcribe(request.audio, request.language);
 
   done.catch((error: unknown) => {

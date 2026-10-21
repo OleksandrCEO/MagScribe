@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
@@ -42,10 +43,34 @@ export const writePrompts = (prompts: Prompts): void => {
   for (const { task, key } of PROMPT_FIELDS) writeSetting(key, prompts[task]);
 };
 
-type ModalProps = { open: boolean; title: string; onClose: () => void; children: ReactNode };
+/**
+ * The two bits of markup a translated line may carry: `*emphasis*` and `` `code` ``. Keeping them inside the
+ * string is what lets a whole sentence be one translatable unit — English and Ukrainian put the emphasis in
+ * different places, and a sentence split into three JSX fragments cannot be reordered.
+ */
+export const rich = (line: string): ReactNode[] =>
+  line.split(/(\*[^*]+\*|`[^`]+`)/).map((part, index) => {
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return (
+        <span key={index} className="font-medium text-foreground">
+          {part.slice(1, -1)}
+        </span>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={index}>{part.slice(1, -1)}</code>;
+    return part;
+  });
+
+/** Paragraphs of a translated body, `rich` applied to each. */
+const paragraphs = (body: string[]): ReactNode =>
+  body.map((line) => (
+    <p key={line}>{rich(line)}</p>
+  ));
+
+type ModalProps = { open: boolean; title: string; close: string; onClose: () => void; children: ReactNode };
 
 /** The shell both windows share: a native <dialog>, so the backdrop, Esc and the focus trap come from the platform. */
-function Modal({ open, title, onClose, children }: ModalProps) {
+function Modal({ open, title, close, onClose, children }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -73,7 +98,8 @@ function Modal({ open, title, onClose, children }: ModalProps) {
           <Button
             variant="ghost"
             size="icon-sm"
-            title="Закрити"
+            title={close}
+            aria-label={close}
             className="-mt-1 -mr-1 text-muted-foreground"
             onClick={onClose}
           >
@@ -86,44 +112,73 @@ function Modal({ open, title, onClose, children }: ModalProps) {
   );
 }
 
-type SettingsProps = { open: boolean; prompts: Prompts; onPrompts: (prompts: Prompts) => void; onClose: () => void };
+type SettingsProps = {
+  open: boolean;
+  s: Strings;
+  lang: UiLang;
+  onLang: (lang: UiLang) => void;
+  prompts: Prompts;
+  onPrompts: (prompts: Prompts) => void;
+  onClose: () => void;
+};
 
-export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsProps) {
+export function SettingsDialog({ open, s, lang, onLang, prompts, onPrompts, onClose }: SettingsProps) {
   return (
-    <Modal open={open} title="Налаштування" onClose={onClose}>
-      <div className="flex flex-col gap-4">
-        <p className="text-xs leading-[1.55] text-muted-foreground">
-          Інструкції, які отримує модель. Можна замінити на власні, або підкоригувати за бажанням. Порожнє поле
-          підставить промпт за замовчуванням.
-        </p>
-
-        {PROMPT_FIELDS.map(({ task, label }) => (
-          <div key={task} className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[13px] font-medium">{label}</span>
-              {/* Nothing to reset while the text is still ours, so the button only shows up once it is not. */}
-              {prompts[task] !== DEFAULT_PROMPTS[task] && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="-my-1 text-muted-foreground"
-                  onClick={() => onPrompts({ ...prompts, [task]: DEFAULT_PROMPTS[task] })}
-                >
-                  Скинути
-                </Button>
-              )}
-            </div>
-            <Textarea
-              value={prompts[task]}
-              spellCheck={false}
-              onChange={(event) => onPrompts({ ...prompts, [task]: event.target.value })}
-              className={cn(
-                'field-sizing-fixed h-44 resize-none text-[12.5px] leading-[1.5] md:text-[12.5px]',
-                '[scrollbar-width:thin] dark:bg-background',
-              )}
-            />
+    <Modal open={open} title={s.ui.settings} close={s.ui.close} onClose={onClose}>
+      <div className="flex flex-col gap-5">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[13px] font-medium">{s.settings.language}</span>
+          {/* Two languages, so a pair of buttons says it all; the first one picked is the system's own. */}
+          <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
+            {UI_LANGS.map((value) => (
+              <Button
+                key={value}
+                variant="ghost"
+                size="xs"
+                aria-pressed={lang === value}
+                className={cn(
+                  'rounded-[7px] px-2.5 text-muted-foreground',
+                  lang === value && 'bg-muted text-foreground',
+                )}
+                onClick={() => onLang(value)}
+              >
+                {LANG_NAMES[value]}
+              </Button>
+            ))}
           </div>
-        ))}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <p className="text-xs leading-[1.55] text-muted-foreground">{s.settings.promptsHint}</p>
+
+          {PROMPT_FIELDS.map(({ task }) => (
+            <div key={task} className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] font-medium">{s.settings.prompt[task]}</span>
+                {/* Nothing to reset while the text is still ours, so the button only shows up once it is not. */}
+                {prompts[task] !== DEFAULT_PROMPTS[task] && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="-my-1 text-muted-foreground"
+                    onClick={() => onPrompts({ ...prompts, [task]: DEFAULT_PROMPTS[task] })}
+                  >
+                    {s.settings.reset}
+                  </Button>
+                )}
+              </div>
+              <Textarea
+                value={prompts[task]}
+                spellCheck={false}
+                onChange={(event) => onPrompts({ ...prompts, [task]: event.target.value })}
+                className={cn(
+                  'field-sizing-fixed h-44 resize-none text-[12.5px] leading-[1.5] md:text-[12.5px]',
+                  '[scrollbar-width:thin] dark:bg-background',
+                )}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </Modal>
   );
@@ -134,18 +189,21 @@ type ConfirmProps = {
   title: string;
   cancel: string;
   confirm: string;
+  close: string;
+  body: string[];
   tone?: 'destructive' | 'default'; // destructive by default: most of these questions cost something
   onConfirm: () => void;
   onClose: () => void;
-  children: ReactNode;
 };
 
 /** The one question the app asks before something it cannot take back. Esc and the backdrop mean «no». */
-export function ConfirmDialog({ open, title, cancel, confirm, tone = 'destructive', onConfirm, onClose, children }: ConfirmProps) {
+export function ConfirmDialog({ open, title, cancel, confirm, close, body, tone = 'destructive', onConfirm, onClose }: ConfirmProps) {
   return (
-    <Modal open={open} title={title} onClose={onClose}>
+    <Modal open={open} title={title} close={close} onClose={onClose}>
       <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">{children}</div>
+        <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">
+          {paragraphs(body)}
+        </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="lg" className="px-4" onClick={onClose}>
             {cancel}
@@ -160,26 +218,21 @@ export function ConfirmDialog({ open, title, cancel, confirm, tone = 'destructiv
 }
 
 /** `engine` is the adapter line the status bar shows, or null while the model is still loading. */
-export function AboutDialog({ open, engine, onClose }: { open: boolean; engine: string | null; onClose: () => void }) {
+export function AboutDialog({
+  open,
+  s,
+  engine,
+  onClose,
+}: {
+  open: boolean;
+  s: Strings;
+  engine: string | null;
+  onClose: () => void;
+}) {
   return (
-    <Modal open={open} title="Про MagScribe" onClose={onClose}>
+    <Modal open={open} title={s.ui.about} close={s.ui.close} onClose={onClose}>
       <div className="flex flex-col gap-3 text-[13px] leading-[1.6] text-muted-foreground">
-        <p>
-          <span className="font-medium text-foreground">MagScribe {__APP_VERSION__}</span> — транскрибація відео
-          й аудіо: текст, субтитри .srt і таймкоди розділів.
-        </p>
-        <p>
-          Зараз розшифровує Whisper large-v3-turbo на цій машині
-          {engine && <span className="text-foreground"> ({engine})</span>}, а конспект і таймкоди пише команда{' '}
-          <code>claude</code> — тобто транскрипт для них іде в Anthropic.
-        </p>
-        <p>Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.</p>
-        <p>
-          Модель — <span className="text-foreground">openai/whisper-large-v3-turbo</span> (MIT) у ONNX-конверсії
-          onnx-community; звук читає системний <code>ffmpeg</code>. Умови сторонніх компонентів — у файлі{' '}
-          <span className="text-foreground">THIRD-PARTY-LICENSES.md</span> поруч із застосунком. Сам MagScribe —
-          під MIT.
-        </p>
+        {paragraphs(s.about(__APP_VERSION__, engine))}
       </div>
     </Modal>
   );

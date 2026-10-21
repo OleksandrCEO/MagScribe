@@ -4,6 +4,7 @@
  * One definition of the sample rate for all three sides: main decodes with ffmpeg, the worker consumes the
  * samples, and the window falls back to the browser's own decoder when the machine has no ffmpeg.
  */
+import { t } from './i18n';
 
 export const SAMPLE_RATE = 16_000;
 
@@ -28,7 +29,7 @@ export const decodeInBrowser = async (bytes: Uint8Array): Promise<Float32Array> 
   // An offline context decodes without opening an output device. The length is a placeholder: nothing renders.
   const decoded = await new OfflineAudioContext(1, 1, SAMPLE_RATE).decodeAudioData(input as ArrayBuffer);
   const frames = Math.ceil(decoded.duration * SAMPLE_RATE);
-  if (frames === 0) throw new Error('У файлі немає звукової доріжки');
+  if (frames === 0) throw new Error(t().error.noAudioTrack);
 
   // One render does both jobs: a buffer of any rate played into a 16 kHz context is resampled, and a source of
   // any channel count connected to a mono destination is downmixed.

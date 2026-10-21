@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { app } from 'electron';
+import { t } from './i18n';
 import { CHAPTERS_PROMPT, SUMMARY_PROMPT, type AiTask } from './prompts';
 
 // Both prompts read the whole transcript, and an hour of speech is a long read even for a fast model.
@@ -29,16 +30,16 @@ const runClaude = (prompt: string, input: string): Promise<string> =>
         }
         const { code } = error as NodeJS.ErrnoException;
         if (code === 'ENOENT') {
-          reject(new Error('Команду claude не знайдено. Встанови Claude Code CLI і перевір, що вона є у PATH.'));
+          reject(new Error(t().error.claudeMissing));
           return;
         }
         // Node kills the child on an oversized stdout too, and `killed` alone would blame the timeout for it.
         if (code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-          reject(new Error('Відповідь claude не вмістилася у 8 МБ'));
+          reject(new Error(t().error.claudeTooBig));
           return;
         }
         if (error.killed) {
-          reject(new Error(`claude не вклався у ${TIMEOUT_MS / 1000} секунд`));
+          reject(new Error(t().error.claudeTimeout(TIMEOUT_MS / 1000)));
           return;
         }
         reject(new Error(stderr.trim() || error.message));

@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
+import { pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Prompts } from '@/prompts';
 import {
@@ -41,8 +42,7 @@ import { timecode, toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
-const formatSize = (bytes: number): string => {
-  const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+const formatSize = (bytes: number, units: string[]): string => {
   const power = bytes > 0 ? Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1) : 0;
   const value = bytes / 1024 ** power;
   return `${power === 0 ? value : value.toFixed(1)} ${units[power]}`;
@@ -60,16 +60,13 @@ const countChapters = (text: string): number =>
 const PAINT_EVERY_MS = 150;
 
 const THEME_KEY = 'theme';
-const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
-  { value: 'light', label: 'Світла', Icon: SunIcon },
-  { value: 'system', label: 'Як у системі', Icon: MonitorIcon },
-  { value: 'dark', label: 'Темна', Icon: MoonIcon },
-];
+const LANG_KEY = 'lang';
 
-const languages: { value: Language; label: string; title: string }[] = [
-  { value: null, label: 'Авто', title: 'Мова розпізнавання — визначити автоматично' },
-  { value: 'uk', label: 'UK', title: 'Мова розпізнавання — українська' },
-  { value: 'en', label: 'EN', title: 'Мова розпізнавання — англійська' },
+// The labels live in i18n, keyed by the same value — `s.theme[value]`.
+const themes: { value: Theme; Icon: typeof SunIcon }[] = [
+  { value: 'light', Icon: SunIcon },
+  { value: 'system', Icon: MonitorIcon },
+  { value: 'dark', Icon: MoonIcon },
 ];
 
 const THEME_VALUES = themes.map(({ value }) => value);
@@ -78,16 +75,6 @@ const THEME_VALUES = themes.map(({ value }) => value);
 type View = 'transcript' | 'subtitles' | 'summary' | 'chapters';
 
 type Screen = View | 'pick' | 'audio';
-
-// The page name leads the system title bar, the app name follows it, the way a browser tab reads.
-const SCREEN_TITLES: Record<Screen, string> = {
-  pick: '',
-  transcript: 'Текст',
-  subtitles: 'Субтитри',
-  summary: 'Конспект',
-  chapters: 'Таймкоди',
-  audio: 'Аудіо',
-};
 
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
 const panelClass =
@@ -130,6 +117,10 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   // Dark by default: this is a window people leave open through a long run, and the system's choice is one click away.
   const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'dark'));
+  // The interface language. Nothing saved yet means the system's own, which is what a first run should open in.
+  const [uiLang, setUiLangState] = useState<UiLang>(() =>
+    readSetting(LANG_KEY, UI_LANGS, pickUiLang(navigator.language)),
+  );
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the claude CLI gets
   const [language, setLanguage] = useState<Language>('uk');
@@ -158,6 +149,8 @@ export default function App() {
   const [closeAsked, setCloseAsked] = useState(false); // main caught a close while a run was in flight
   const [noFfmpeg, setNoFfmpeg] = useState<string | null>(null); // why the «потрібен ffmpeg» window is open
   const ffmpegReady = useRef(true); // asked once on startup; assume yes until main says otherwise
+
+  const s = STRINGS[uiLang]; // every line this window shows
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -189,7 +182,7 @@ export default function App() {
         setModel({ adapter: message.adapter, encoder: message.encoder });
         ready.current = true;
       }
-      if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
+      if (message.type === 'fallback') setFallback(s.error.fallback(message.from, message.reason));
       if (message.type === 'progress') {
         setProgress(message.progress);
         covered.current = offset.current + message.covered;
@@ -212,7 +205,7 @@ export default function App() {
         setResumeAt(null);
         setProgress(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-        window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(whole)} слів`);
+        window.api.notify('MagScribe', s.toast.transcribed(s.words(countWords(whole))));
       }
       if (message.type === 'error') {
         // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
@@ -224,9 +217,9 @@ export default function App() {
     });
 
     // A worker that fails to load its own module never posts anything, and the window would wait forever.
-    worker.addEventListener('error', (event) => setModelError(event.message || 'Воркер не запустився'));
+    worker.addEventListener('error', (event) => setModelError(event.message || s.error.workerFailed));
 
-    worker.postMessage({ type: 'load' } satisfies WorkerRequest);
+    worker.postMessage({ type: 'load', lang: uiLang } satisfies WorkerRequest);
   };
 
   useEffect(() => {
@@ -236,7 +229,7 @@ export default function App() {
     window.api.onAudioProgress(setConversion);
     window.api.onCloseAsk(() => setCloseAsked(true));
     window.api.onGpuGone((message) => {
-      setModelError(`${message}. Перезапусти застосунок.`);
+      setModelError(s.error.restartApp(message));
       setProgress(null);
     });
 
@@ -249,6 +242,15 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => writePrompts(prompts), [prompts]);
+
+  // What the window speaks: remembered, read out by a screen reader, and passed on to main, which has its own
+  // strings for the open dialog and for the errors it reports.
+  useEffect(() => {
+    setUiLang(uiLang);
+    writeSetting(LANG_KEY, uiLang);
+    document.documentElement.lang = uiLang;
+    window.api.setLang(uiLang);
+  }, [uiLang]);
 
   // ffmpeg or the worker holding the file: this is what freezes the text and what the stop button can stop.
   const running = converting || progress !== null || exporting || savingTrack;
@@ -321,7 +323,7 @@ export default function App() {
     setSavingTrack(false);
     setProgress(null);
     setMerging(false);
-    toast.info(reached > 0 ? `Зупинено на ${timecode(reached)} — можна продовжити` : 'Зупинено');
+    toast.info(reached > 0 ? s.toast.stoppedAt(timecode(reached)) : s.toast.stopped);
   };
 
   const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
@@ -367,7 +369,7 @@ export default function App() {
       // could not read this particular file, and the answer to that is the same window as a missing binary.
       if (!stopped.current) {
         if (ffmpegReady.current) failWith(error);
-        else setNoFfmpeg('Цей файл не вдалося прочитати — для нього потрібен ffmpeg.');
+        else setNoFfmpeg(s.ffmpegDialog.cannotRead);
       }
       setProgress(null);
     } finally {
@@ -378,7 +380,7 @@ export default function App() {
   const convertToAudio = async (): Promise<void> => {
     if (!file) return;
     if (!ffmpegReady.current) {
-      setNoFfmpeg('Щоб зберегти аудіодоріжку окремим файлом, потрібен ffmpeg.');
+      setNoFfmpeg(s.ffmpegDialog.forTrack);
       return;
     }
 
@@ -405,7 +407,7 @@ export default function App() {
   const saveTrack = async (): Promise<void> => {
     if (!file) return;
     if (!ffmpegReady.current) {
-      setNoFfmpeg('Щоб зберегти аудіодоріжку окремим файлом, потрібен ffmpeg.');
+      setNoFfmpeg(s.ffmpegDialog.forTrack);
       return;
     }
 
@@ -424,13 +426,13 @@ export default function App() {
   };
 
   const copy = async (text: string): Promise<void> => {
-    if (await window.api.copyText(text)) toast.success('Скопійовано');
-    else toast.error('Буфер обміну не прийняв текст');
+    if (await window.api.copyText(text)) toast.success(s.toast.copied);
+    else toast.error(s.toast.clipboardRefused);
   };
 
   const save = async (saved: Promise<boolean>): Promise<void> => {
     try {
-      if (await saved) toast.success('Збережено');
+      if (await saved) toast.success(s.toast.saved);
     } catch (error) {
       failWith(error);
     }
@@ -470,31 +472,31 @@ export default function App() {
   const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
 
   const job: Job | null = exporting || savingTrack
-    ? { label: 'Готую аудіофайл', value: conversion }
+    ? { label: s.job.audioFile, value: conversion }
     : converting
       // The browser decoder reports nothing on its way; only ffmpeg has a percentage to show.
-      ? { label: 'Читаю звук із файлу', value: ffmpegReady.current ? conversion : undefined }
+      ? { label: s.job.readingAudio, value: ffmpegReady.current ? conversion : undefined }
       : merging
-        ? { label: 'Збираю текст і таймкоди' }
+        ? { label: s.job.merging }
         : progress !== null
-          ? { label: 'Транскрибація', value: progress }
+          ? { label: s.job.transcribing, value: progress }
           : aiTask
-            ? { label: aiTask === 'summary' ? 'Готую конспект' : 'Готую таймкоди' }
+            ? { label: aiTask === 'summary' ? s.job.summary : s.job.chapters }
             : modelStage === 'downloading'
-              ? { label: 'Завантаження моделі', value: download }
+              ? { label: s.job.downloading, value: download }
               : modelStage === 'preparing'
-                ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
+                ? { label: s.job.preparing }
                 : null;
 
   const status = busy
-    ? 'Машина не засне до завершення'
+    ? s.status.awake
     : model
       ? transcript || audio
-        ? 'Готово'
-        : 'Модель готова'
+        ? s.status.done
+        : s.status.modelReady
       : modelStage === 'preparing'
-        ? 'Готую модель'
-        : 'Завантажую модель';
+        ? s.status.preparing
+        : s.status.downloading;
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
   const stage = audio || exporting ? 'audio' : transcript || running ? 'text' : 'pick';
@@ -504,11 +506,12 @@ export default function App() {
   const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
 
   // Electron takes the window title from the document, so the taskbar can say which screen is open.
+  // The page name leads the system title bar, the app name follows it, the way a browser tab reads.
   const screenTitle = exporting
-    ? 'Конвертація'
+    ? s.screen.conversion
     : converting || progress !== null
-      ? 'Транскрибація'
-      : SCREEN_TITLES[screen];
+      ? s.screen.transcription
+      : { pick: '', ...s.screen }[screen];
 
   useEffect(() => {
     document.title = screenTitle ? `${screenTitle} — MagScribe` : 'MagScribe';
@@ -530,11 +533,11 @@ export default function App() {
           <UploadIcon className="size-5" strokeWidth={1.75} />
         </div>
         <div className="flex flex-col gap-1">
-          <span className="font-medium">Перетягни відео або аудіо</span>
-          <span className="text-[13px] text-muted-foreground">MP4, MKV, MOV, MP3, WAV та інші</span>
+          <span className="font-medium">{s.ui.dropTitle}</span>
+          <span className="text-[13px] text-muted-foreground">{s.ui.dropHint}</span>
         </div>
         <Button variant="outline" onClick={chooseFile}>
-          Вибрати файл
+          {s.ui.dropPick}
         </Button>
       </div>
 
@@ -543,7 +546,7 @@ export default function App() {
           <FileVideoIcon className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-[13.5px] font-medium">{file.name}</span>
-            <span className="text-xs text-muted-foreground">{formatSize(file.size)}</span>
+            <span className="text-xs text-muted-foreground">{formatSize(file.size, s.sizes)}</span>
           </div>
         </div>
       )}
@@ -555,7 +558,7 @@ export default function App() {
     <>
       <PillButton
         icon={<ClipboardCopyIcon />}
-        label="Копіювати"
+        label={s.pill.copy}
         disabled={out.disabled}
         onClick={() => copy(out.text)}
       />
@@ -571,26 +574,26 @@ export default function App() {
 
   // The lead button follows what is on screen: the text leads to a summary, the .srt leads to chapters.
   const summaryButton: ReactNode = summary ? (
-    <PillButton lead icon={<SparklesIcon />} label="Конспект" disabled={!done} onClick={() => setView('summary')} />
+    <PillButton lead icon={<SparklesIcon />} label={s.pill.summary} disabled={!done} onClick={() => setView('summary')} />
   ) : (
     <PillButton
       lead
       icon={<SparklesIcon />}
-      label="Опрацювати"
-      wide={aiTask === 'summary' ? 'Готую конспект…' : undefined}
+      label={s.pill.process}
+      wide={aiTask === 'summary' ? s.pill.processing : undefined}
       disabled={!done || aiTask !== null}
       onClick={() => runAi('summary')}
     />
   );
 
   const chaptersButton: ReactNode = chapters ? (
-    <PillButton lead icon={<ListOrderedIcon />} label="Таймкоди" disabled={!done} onClick={() => setView('chapters')} />
+    <PillButton lead icon={<ListOrderedIcon />} label={s.pill.chapters} disabled={!done} onClick={() => setView('chapters')} />
   ) : (
     <PillButton
       lead
       icon={<ListOrderedIcon />}
-      label="Таймкоди"
-      wide={aiTask === 'chapters' ? 'Готую таймкоди…' : undefined}
+      label={s.pill.chapters}
+      wide={aiTask === 'chapters' ? s.pill.chaptering : undefined}
       disabled={!done || segments.length === 0 || aiTask !== null}
       onClick={() => runAi('chapters')}
     />
@@ -600,8 +603,8 @@ export default function App() {
     <PillButton
       lead={lead}
       icon={<AudioLinesIcon />}
-      label="Транскрибувати"
-      wide={busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : undefined}
+      label={s.pill.transcribe}
+      wide={busy && stage === 'text' ? s.pill.transcribing : pending ? s.pill.waitingForModel : undefined}
       disabled={!file || busy || pending || modelStage === 'failed'}
       onClick={() => {
         pendingFrom.current = undefined;
@@ -644,7 +647,7 @@ export default function App() {
                       render={
                         <button
                           type="button"
-                          aria-label="Зберегти аудіодоріжку .ogg"
+                          aria-label={s.ui.saveTrack}
                           disabled={busy}
                           onClick={() => void saveTrack()}
                           className={cn(
@@ -657,31 +660,31 @@ export default function App() {
                         </button>
                       }
                     />
-                    <TooltipContent>Зберегти аудіодоріжку .ogg</TooltipContent>
+                    <TooltipContent>{s.ui.saveTrack}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
             </div>
             <p className="mb-6 text-center text-[13px] text-muted-foreground">
               {screen === 'summary'
-                ? `Конспект · ${countWords(summary)} слів`
+                ? `${s.screen.summary} · ${s.words(countWords(summary))}`
                 : screen === 'subtitles'
-                  ? `Субтитри · SRT · ${segments.length} реплік`
+                  ? `${s.screen.subtitles} · SRT · ${s.cues(segments.length)}`
                   : screen === 'chapters'
-                    ? `Таймкоди · ${countChapters(chapters)} розділів`
+                    ? `${s.screen.chapters} · ${s.chapters(countChapters(chapters))}`
                     : audio
-                      ? `OGG · Opus · ${formatSize(audio.size)}`
-                      : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
+                      ? `OGG · Opus · ${formatSize(audio.size, s.sizes)}`
+                      : file && `${formatSize(file.size, s.sizes)} · ${extension.toUpperCase()}`}
               {screen === 'transcript' &&
                 elapsed !== null &&
-                ` · розшифровано за ${timecode(elapsed)} · ${countWords(transcript)} слів`}
+                s.ui.transcribedIn(timecode(elapsed), s.words(countWords(transcript)))}
             </p>
 
             {screen === 'audio' ? (
               audio && (
                 <div className="flex items-center justify-center gap-3 text-muted-foreground">
                   <FileAudioIcon className="size-5" strokeWidth={1.75} />
-                  <span>Аудіодоріжку витягнуто. Збережи її або запусти транскрибацію.</span>
+                  <span>{s.ui.audioReady}</span>
                 </div>
               )
             ) : screen === 'summary' ? (
@@ -736,8 +739,8 @@ export default function App() {
         )}
       >
         {([
-          ['settings', 'Налаштування'],
-          ['about', 'Про MagScribe'],
+          ['settings', s.ui.settings],
+          ['about', s.ui.about],
         ] as const).map(([target, label]) => (
           <button
             key={target}
@@ -755,17 +758,17 @@ export default function App() {
       <div className="absolute top-4 right-5 flex items-center gap-2">
         {stage !== 'pick' && !busy && (
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={startOver}>
-            <RotateCcwIcon /> Почати заново
+            <RotateCcwIcon /> {s.ui.startOver}
           </Button>
         )}
         <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
-          {themes.map(({ value, label, Icon }) => (
+          {themes.map(({ value, Icon }) => (
             <Button
               key={value}
               variant="ghost"
               size="icon-xs"
-              title={label}
-              aria-label={label}
+              title={s.theme[value]}
+              aria-label={s.theme[value]}
               aria-pressed={theme === value}
               className={cn(
                 'size-6.5 rounded-[7px] text-muted-foreground',
@@ -791,8 +794,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  title="Зупинити"
-                  aria-label="Зупинити"
+                  title={s.ui.stop}
+                  aria-label={s.ui.stop}
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                   // Only a run that is decoding has something to lose; reading the file or encoding a track
                   // stops without a word.
@@ -854,7 +857,7 @@ export default function App() {
                 spawnWorker();
               }}
             >
-              Спробувати ще раз
+              {s.ui.retry}
             </button>
           ) : (
             model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>
@@ -872,8 +875,8 @@ export default function App() {
               {transcribeButton(true)}
               <PillButton
                 icon={<FileAudioIcon />}
-                label="Конвертувати у звук"
-                wide="Конвертувати"
+                label={s.pill.convert}
+                wide={s.pill.convertShort}
                 disabled={!file}
                 onClick={convertToAudio}
               />
@@ -885,13 +888,13 @@ export default function App() {
               {takeOut({
                 text: onSubtitles ? subtitles : transcript,
                 file: `${baseName}${onSubtitles ? '.srt' : '.txt'}`,
-                label: onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt',
+                label: onSubtitles ? s.pill.saveSrt : s.pill.saveTxt,
                 disabled: !done,
               })}
               {resumeAt !== null && (
                 <PillButton
                   icon={<PlayIcon />}
-                  label={`Продовжити з ${timecode(resumeAt)}`}
+                  label={s.pill.resumeFrom(timecode(resumeAt))}
                   disabled={!file || busy || pending || modelStage === 'failed'}
                   onClick={() => {
                     pendingFrom.current = resumeAt;
@@ -903,8 +906,8 @@ export default function App() {
               {segments.length > 0 && (
                 <PillButton
                   icon={onSubtitles ? <FileTextIcon /> : <CaptionsIcon />}
-                  label={onSubtitles ? 'До тексту' : 'До субтитрів'}
-                  wide={onSubtitles ? 'Текст' : 'Субтитри'}
+                  label={onSubtitles ? s.pill.toText : s.pill.toSubtitles}
+                  wide={onSubtitles ? s.pill.text : s.pill.subtitles}
                   disabled={!done}
                   onClick={() => setView(onSubtitles ? 'transcript' : 'subtitles')}
                 />
@@ -914,14 +917,14 @@ export default function App() {
           )}
           {screen === 'chapters' && (
             <>
-              <PillButton icon={<ArrowLeftIcon />} label="До субтитрів" onClick={() => setView('subtitles')} />
-              {takeOut({ text: chapters, file: `${baseName} — таймкоди.txt`, label: 'Зберегти .txt', lead: true })}
+              <PillButton icon={<ArrowLeftIcon />} label={s.pill.toSubtitles} onClick={() => setView('subtitles')} />
+              {takeOut({ text: chapters, file: s.file.chapters(baseName), label: s.pill.saveTxt, lead: true })}
             </>
           )}
           {screen === 'summary' && (
             <>
-              <PillButton icon={<ArrowLeftIcon />} label="До транскрипту" onClick={() => setView('transcript')} />
-              {takeOut({ text: summary, file: `${baseName} — конспект.txt`, label: 'Зберегти .txt', lead: true })}
+              <PillButton icon={<ArrowLeftIcon />} label={s.pill.toTranscript} onClick={() => setView('transcript')} />
+              {takeOut({ text: summary, file: s.file.summary(baseName), label: s.pill.saveTxt, lead: true })}
             </>
           )}
           {stage === 'audio' && (
@@ -929,7 +932,7 @@ export default function App() {
               <PillButton
                 lead
                 icon={<DownloadIcon />}
-                label="Зберегти .ogg"
+                label={s.pill.saveOgg}
                 disabled={!audio}
                 onClick={() => audio && save(window.api.saveAudio(audio.path, `${baseName}.ogg`))}
               />
@@ -942,7 +945,11 @@ export default function App() {
             Three bare words need to say what they are for, so each carries a tooltip. */}
         <TooltipProvider delay={350}>
           <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end self-center text-xs">
-            {languages.map(({ value, label, title }) => (
+            {[
+              { value: null, label: s.speech.auto, title: s.speech.autoHint },
+              { value: 'uk', label: 'UK', title: s.speech.ukHint },
+              { value: 'en', label: 'EN', title: s.speech.enHint },
+            ].map(({ value, label, title }) => (
               <Tooltip key={label}>
                 <TooltipTrigger
                   render={
@@ -954,7 +961,7 @@ export default function App() {
                         'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
                         language === value && 'font-medium text-foreground',
                       )}
-                      onClick={() => setLanguage(value)}
+                      onClick={() => setLanguage(value as Language)}
                     >
                       {label}
                     </button>
@@ -969,23 +976,21 @@ export default function App() {
 
       <ConfirmDialog
         open={confirming}
-        title="Зупинити транскрибацію?"
-        cancel="Хай працює"
-        confirm="Зупинити"
+        title={s.stopDialog.title}
+        cancel={s.stopDialog.cancel}
+        confirm={s.stopDialog.confirm}
+        close={s.ui.close}
+        body={s.stopDialog.body}
         onConfirm={stop}
         onClose={() => setConfirming(false)}
-      >
-        <p>Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.</p>
-        <p>
-          Але субтитри <span className="font-medium text-foreground">.srt</span> для цього файлу вже не вийдуть:
-          таймкоди складаються в одне ціле лише наприкінці повного прогону.
-        </p>
-      </ConfirmDialog>
+      />
       <ConfirmDialog
         open={closeAsked}
-        title="Закрити застосунок?"
-        cancel="Хай працює"
-        confirm="Закрити"
+        title={s.closeDialog.title}
+        cancel={s.closeDialog.cancel}
+        confirm={s.closeDialog.confirm}
+        close={s.ui.close}
+        body={s.closeDialog.body}
         onConfirm={() => {
           setCloseAsked(false);
           window.api.answerClose(true);
@@ -994,19 +999,14 @@ export default function App() {
           setCloseAsked(false);
           window.api.answerClose(false);
         }}
-      >
-        <p>Робота ще триває.</p>
-        <p>
-          Якщо закрити зараз, усе розшифроване{' '}
-          <span className="font-medium text-foreground">зникне без сліду</span> — на відміну від зупинки, тут
-          нічого не лишається на екрані.
-        </p>
-      </ConfirmDialog>
+      />
       <ConfirmDialog
         open={noFfmpeg !== null}
-        title="Потрібен ffmpeg"
-        cancel="Зрозуміло"
-        confirm="Відкрити сайт ffmpeg"
+        title={s.ffmpegDialog.title}
+        cancel={s.ffmpegDialog.cancel}
+        confirm={s.ffmpegDialog.confirm}
+        close={s.ui.close}
+        body={s.ffmpegDialog.body(noFfmpeg ?? '')}
         tone="default"
         onConfirm={() => {
           window.api.openFfmpegDownload();
@@ -1017,27 +1017,19 @@ export default function App() {
           setNoFfmpeg(null);
           void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
         }}
-      >
-        <p>
-          {noFfmpeg} Утиліта <span className="font-medium text-foreground">ffmpeg</span> у системі не знайшлася.
-        </p>
-        <p>
-          Коротке відео чи аудіо MagScribe розшифрує й без неї — прочитає сам, декодером браузера. Але довгі
-          файли, контейнери AVI та WMV і збереження аудіодоріжки без ffmpeg не вийдуть.
-        </p>
-        <p>
-          У Linux вона майже завжди є в пакетах дистрибутива (<code>ffmpeg</code>); для Windows і macOS збірки
-          лежать на сайті проєкту.
-        </p>
-      </ConfirmDialog>
+      />
       <SettingsDialog
         open={dialog === 'settings'}
+        s={s}
+        lang={uiLang}
+        onLang={setUiLangState}
         prompts={prompts}
         onPrompts={setPrompts}
         onClose={() => setDialog(null)}
       />
       <AboutDialog
         open={dialog === 'about'}
+        s={s}
         engine={model && `${model.adapter} · ${model.encoder}`}
         onClose={() => setDialog(null)}
       />

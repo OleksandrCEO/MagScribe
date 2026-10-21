@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
+import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { MAX_BROWSER_DECODE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS } from './summary';
@@ -197,9 +198,9 @@ ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
-      { name: 'Відео', extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'mpg', 'mpeg', 'wmv'] },
-      { name: 'Аудіо', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'opus', 'aac', 'wma'] },
-      { name: 'Усі файли', extensions: ['*'] },
+      { name: t().filter.video, extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'mpg', 'mpeg', 'wmv'] },
+      { name: t().filter.audio, extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'opus', 'aac', 'wma'] },
+      { name: t().filter.all, extensions: ['*'] },
     ],
   });
   if (canceled || filePaths.length === 0) return null;
@@ -343,6 +344,11 @@ ipcMain.on('close:answer', (_event, quit: unknown) => {
 
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
 
+// The window's own choice, which may differ from the system locale main started with.
+ipcMain.on('lang:set', (_event, lang: unknown) => {
+  if (UI_LANGS.includes(lang as UiLang)) setUiLang(lang as UiLang);
+});
+
 ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
   if (!Notification.isSupported()) return;
 
@@ -370,6 +376,8 @@ ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: un
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
   Menu.setApplicationMenu(null);
+  // Until the window reports what it is set to, main speaks the system's language.
+  setUiLang(pickUiLang(app.getLocale()));
   // The app is dark unless told otherwise, and this is what the first frame is painted with: the renderer
   // re-asserts the saved choice a moment later, but by then the window must not have flashed white.
   nativeTheme.themeSource = 'dark';
@@ -403,7 +411,7 @@ app.on('child-process-gone', (_event, details) => {
     // no log yet, or it cannot be read — either way the append below is still worth trying
   }
   fs.appendFile(log, `${line}\n`, () => {});
-  mainWindow?.webContents.send('gpu:gone', `GPU-процес завершився (${details.reason}, код ${details.exitCode})`);
+  mainWindow?.webContents.send('gpu:gone', t().error.gpuGone(details.reason, details.exitCode));
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ExportedAudio } from './preload';
+import { t } from './i18n';
 import { SAMPLE_RATE } from './pcm';
 
 const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
@@ -38,8 +39,6 @@ export const ffmpegBinary = (): string | null => {
   return ffmpegPath;
 };
 
-export const FFMPEG_MISSING = 'Не знайдено ffmpeg. Встанови його — без нього не вийде ні прочитати звук, ні зберегти аудіо.';
-
 export type OnProgress = (percent: number) => void;
 
 const parseClock = (clock: string): number => {
@@ -70,13 +69,13 @@ const runFfmpeg = (
   new Promise((resolve, reject) => {
     const binary = ffmpegBinary();
     if (binary === null) {
-      reject(new Error(FFMPEG_MISSING));
+      reject(new Error(t().error.ffmpegMissing));
       return;
     }
     // One conversion at a time: `running` is a single handle, and a second run would leave the first one
     // unkillable. The window already prevents this; main does not take the window's word for it.
     if (running !== null) {
-      reject(new Error('Конвертація вже триває'));
+      reject(new Error(t().error.ffmpegBusy));
       return;
     }
 
@@ -136,7 +135,7 @@ export const extractAudio = async (filePath: string, onProgress?: OnProgress, fr
 
   const pcm = Buffer.concat(chunks);
   const samples = Math.floor(pcm.length / Float32Array.BYTES_PER_ELEMENT);
-  if (samples === 0) throw new Error(`No audio track found in ${filePath}`);
+  if (samples === 0) throw new Error(t().error.noAudioTrack);
 
   // Buffer.concat may hand back a view into a larger pool, so respect byteOffset instead of assuming 0.
   return new Float32Array(pcm.buffer, pcm.byteOffset, samples);
