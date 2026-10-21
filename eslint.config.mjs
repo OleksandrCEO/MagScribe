@@ -8,7 +8,8 @@ import { config, configs as tsConfigs } from 'typescript-eslint';
 // only tool that catches the class of mistake App.tsx can make — a stale closure in an effect, a dependency
 // that is really a ref, a worker spawned from a callback that captured the previous render.
 export default config(
-  { ignores: ['.vite/', 'out/', 'dist/', '.direnv/'] },
+  // public/ holds the onnxruntime runtime copied out of node_modules at build time, minified and not ours.
+  { ignores: ['.vite/', 'out/', 'dist/', '.direnv/', 'public/'] },
   {
     // Named explicitly: without it `eslint .` would only discover the .js files.
     files: ['**/*.{ts,tsx,mts,js,mjs}'],
