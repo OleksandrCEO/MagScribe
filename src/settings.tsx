@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { XIcon } from 'lucide-react';
+import { RotateCcwIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
@@ -93,22 +93,24 @@ export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsPr
     <Modal open={open} title="Налаштування" onClose={onClose}>
       <div className="flex flex-col gap-4">
         <p className="text-xs leading-[1.55] text-muted-foreground">
-          Інструкції, які отримує модель. Типові написані нами — міняй, якщо потрібен інший формат, інша довжина
-          чи інша мова відповіді. Порожнє поле повертає типову.
+          Інструкції, які отримує модель. Можна замінити на власні, або підкоригувати за бажанням. Порожнє поле
+          підставить промпт за замовчуванням.
         </p>
 
         {PROMPT_FIELDS.map(({ task, label }) => (
           <div key={task} className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[13px] font-medium">{label}</span>
+              {/* Nothing to reset while the text is still ours, so the button only shows up once it is not. */}
               {prompts[task] !== DEFAULT_PROMPTS[task] && (
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="-my-1 text-muted-foreground"
                   onClick={() => onPrompts({ ...prompts, [task]: DEFAULT_PROMPTS[task] })}
                 >
-                  Повернути типову
-                </button>
+                  <RotateCcwIcon /> Скинути
+                </Button>
               )}
             </div>
             <Textarea
