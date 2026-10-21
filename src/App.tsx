@@ -29,7 +29,7 @@ import { findGpu, isRealGpu, type Gpu } from '@/gpu';
 import { formatSize, pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
 import { cachedModels, deleteModel, modelBytes, MODELS, MODEL_IDS, recommendedModel, type ModelId } from '@/models';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import type { Prompts } from '@/prompts';
+import type { AiTask, Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
@@ -119,8 +119,21 @@ const StatusLink = ({ label, onClick }: { label: string; onClick: () => void }) 
   </button>
 );
 
+/**
+ * What the window is busy with — one at a time, and never two at once, which is what makes this a union and
+ * not the six booleans it used to be. Everything downstream reads it: the block above the pill, the stop
+ * button, whether the text panel is editable, and whether the machine is allowed to doze off.
+ */
+type Job =
+  // The three ffmpeg runs: one percentage, one source. `reading` decodes the file into samples for the model,
+  // `exporting` encodes the track the audio screen shows, `saving` is the same encode from a result screen.
+  | { kind: 'reading' | 'exporting' | 'saving'; percent: number }
+  // The worker. `merging` is its last phase: the chunks are decoded and the overlaps are being stitched.
+  | { kind: 'transcribing'; percent: number; merging: boolean }
+  | { kind: 'ai'; task: AiTask }; // the claude CLI, which is work too, but work that nothing can stop
+
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
-type Job = { label: string; value?: number };
+type Bar = { label: string; value?: number };
 
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
@@ -145,10 +158,7 @@ export default function App() {
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
-  const [converting, setConverting] = useState(false); // decoding the file for the model
-  const [conversion, setConversion] = useState(0); // percentage of the ffmpeg run behind converting/exporting
-  const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
-  const [merging, setMerging] = useState(false); // all chunks decoded, the pipeline is stitching them together
+  const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
   const [transcript, setTranscript] = useState('');
   const [segments, setSegments] = useState<Segment[]>([]); // timestamped speech, behind the subtitles and chapters
   const [subtitles, setSubtitles] = useState(''); // the .srt itself, so it can be fixed up before saving
@@ -156,9 +166,6 @@ export default function App() {
   const [summary, setSummary] = useState('');
   const [chapters, setChapters] = useState('');
   const [view, setView] = useState<View>('transcript'); // each result has its own screen over the transcript
-  const [aiTask, setAiTask] = useState<'summary' | 'chapters' | null>(null); // what the claude CLI is chewing on
-  const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
-  const [savingTrack, setSavingTrack] = useState(false); // the same encode, but asked for from a result screen
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
@@ -215,26 +222,29 @@ export default function App() {
       }
       if (message.type === 'fallback') setFallback(s.error.fallback(message.from, message.reason));
       if (message.type === 'progress') {
-        setProgress(message.progress);
+        setJob({ kind: 'transcribing', percent: message.progress, merging: false });
         covered.current = offset.current + message.covered;
       }
-      if (message.type === 'merging') setMerging(true);
+      if (message.type === 'merging') {
+        setJob((current) => (current?.kind === 'transcribing' ? { ...current, merging: true } : current));
+      }
       if (message.type === 'partial') {
         // More text is still coming, so the «stitching» the estimate announced a moment ago has not started.
-        setMerging(false);
+        setJob((current) =>
+          current?.kind === 'transcribing' && current.merging ? { ...current, merging: false } : current,
+        );
         if (Date.now() - painted.current < PAINT_EVERY_MS) return;
         painted.current = Date.now();
         setTranscript(kept.current + message.text);
       }
       if (message.type === 'result') {
         const whole = kept.current + message.text;
-        setMerging(false);
         setTranscript(whole);
         // A resumed run only has timestamps for the part it did, and half an .srt is worse than none.
         setSegments(resumed.current ? [] : message.segments);
         setSubtitles(resumed.current ? '' : toSrt(message.segments));
         setResumeAt(null);
-        setProgress(null);
+        setJob(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
         window.api.notify('MagScribe', s.toast.transcribed(s.words(countWords(whole))));
       }
@@ -242,8 +252,7 @@ export default function App() {
         // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
         if (!ready.current) setModelError(message.message);
         else toast.error(message.message);
-        setProgress(null);
-        setMerging(false);
+        setJob((current) => (current?.kind === 'transcribing' ? null : current));
       }
     });
 
@@ -272,11 +281,18 @@ export default function App() {
     });
 
     void window.api.hasFfmpeg().then(setFfmpegReady);
-    window.api.onAudioProgress(setConversion);
+    // The percentage of whichever ffmpeg run is going on; nothing else in main reports one.
+    window.api.onAudioProgress((percent) =>
+      setJob((current) =>
+        current?.kind === 'reading' || current?.kind === 'exporting' || current?.kind === 'saving'
+          ? { ...current, percent }
+          : current,
+      ),
+    );
     window.api.onCloseAsk(() => setCloseAsked(true));
     window.api.onGpuGone((message) => {
       setModelError(s.error.restartApp(message));
-      setProgress(null);
+      setJob((current) => (current?.kind === 'transcribing' ? null : current));
     });
 
     return () => workerRef.current?.terminate();
@@ -302,10 +318,10 @@ export default function App() {
   }, [uiLang]);
 
   // ffmpeg or the worker holding the file: this is what freezes the text and what the stop button can stop.
-  const running = converting || progress !== null || exporting || savingTrack;
+  const running = job !== null && job.kind !== 'ai';
   // The claude run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
   // window has to ask, and nothing new may start underneath it and then be overwritten by its answer.
-  const busy = running || aiTask !== null;
+  const busy = job !== null;
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -367,11 +383,7 @@ export default function App() {
     // Where the text got to: the run can pick up there instead of starting the file over.
     const reached = covered.current;
     setResumeAt(reached > 0 ? reached : null);
-    setConverting(false);
-    setExporting(false);
-    setSavingTrack(false);
-    setProgress(null);
-    setMerging(false);
+    setJob(null);
     toast.info(reached > 0 ? s.toast.stoppedAt(timecode(reached)) : s.toast.stopped);
   };
 
@@ -404,14 +416,12 @@ export default function App() {
 
     stopped.current = false;
     setPending(false);
-    setMerging(false);
-    setConversion(0);
-    setConverting(true);
+    setJob({ kind: 'reading', percent: 0 });
     startedAt.current = Date.now();
     try {
       const samples = await readSamples(file.path, from);
       if (stopped.current) return; // the stop caught up while ffmpeg was finishing: the worker is a new one
-      setProgress(0);
+      setJob({ kind: 'transcribing', percent: 0, merging: false });
       workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
       // A killed ffmpeg rejects like a broken one. With no ffmpeg at all, a failure here means the browser
@@ -420,9 +430,9 @@ export default function App() {
         if (ffmpegReady) failWith(error);
         else setNoFfmpeg(s.ffmpegDialog.cannotRead);
       }
-      setProgress(null);
     } finally {
-      setConverting(false);
+      // Only our own reading: by now the worker may already be transcribing, or a stop may have cleared it.
+      setJob((current) => (current?.kind === 'reading' ? null : current));
     }
   };
 
@@ -482,8 +492,7 @@ export default function App() {
 
     clearResults();
     stopped.current = false;
-    setConversion(0);
-    setExporting(true);
+    setJob({ kind: 'exporting', percent: 0 });
     try {
       const track = await window.api.exportAudio(file.path);
       if (stopped.current) return; // stopped mid-encode: do not throw the window onto the audio screen
@@ -491,7 +500,7 @@ export default function App() {
     } catch (error) {
       if (!stopped.current) failWith(error);
     } finally {
-      setExporting(false);
+      setJob((current) => (current?.kind === 'exporting' ? null : current));
     }
   };
 
@@ -508,8 +517,7 @@ export default function App() {
     }
 
     stopped.current = false;
-    setConversion(0);
-    setSavingTrack(true);
+    setJob({ kind: 'saving', percent: 0 });
     try {
       const track = audio ?? (await window.api.exportAudio(file.path));
       if (stopped.current) return; // stopped mid-encode: a save dialog nobody asked for is worse than nothing
@@ -517,7 +525,7 @@ export default function App() {
     } catch (error) {
       if (!stopped.current) failWith(error);
     } finally {
-      setSavingTrack(false);
+      setJob((current) => (current?.kind === 'saving' ? null : current));
     }
   };
 
@@ -535,8 +543,8 @@ export default function App() {
   };
 
   // Both stages run the local claude CLI: a summary of the plain text, chapters of the timestamped lines.
-  const runAi = async (task: 'summary' | 'chapters'): Promise<void> => {
-    setAiTask(task);
+  const runAi = async (task: AiTask): Promise<void> => {
+    setJob({ kind: 'ai', task });
     try {
       const text =
         task === 'summary'
@@ -548,7 +556,7 @@ export default function App() {
     } catch (error) {
       failWith(error);
     } finally {
-      setAiTask(null);
+      setJob((current) => (current?.kind === 'ai' ? null : current));
     }
   };
 
@@ -583,22 +591,30 @@ export default function App() {
             ? 'preparing'
             : 'downloading';
 
-  const job: Job | null = exporting || savingTrack
-    ? { label: s.job.audioFile, value: conversion }
-    : converting
-      // The browser decoder reports nothing on its way; only ffmpeg has a percentage to show.
-      ? { label: s.job.readingAudio, value: ffmpegReady ? conversion : undefined }
-      : merging
-        ? { label: s.job.merging }
-        : progress !== null
-          ? { label: s.job.transcribing, value: progress }
-          : aiTask
-            ? { label: aiTask === 'summary' ? s.job.summary : s.job.chapters }
-            : modelStage === 'downloading'
-              ? { label: s.job.downloading, value: download }
-              : modelStage === 'preparing'
-                ? { label: s.job.preparing }
-                : null;
+  /** The job in words, or — when there is no job — whatever the model itself is still doing. */
+  const barFor = (current: Job | null): Bar | null => {
+    if (current === null) {
+      if (modelStage === 'downloading') return { label: s.job.downloading, value: download };
+      if (modelStage === 'preparing') return { label: s.job.preparing };
+      return null;
+    }
+    switch (current.kind) {
+      case 'reading':
+        // The browser decoder reports nothing on its way; only ffmpeg has a percentage to show.
+        return { label: s.job.readingAudio, value: ffmpegReady ? current.percent : undefined };
+      case 'exporting':
+      case 'saving':
+        return { label: s.job.audioFile, value: current.percent };
+      case 'transcribing':
+        return current.merging
+          ? { label: s.job.merging }
+          : { label: s.job.transcribing, value: current.percent };
+      case 'ai':
+        return { label: current.task === 'summary' ? s.job.summary : s.job.chapters };
+    }
+  };
+
+  const bar = barFor(job);
 
   const status = busy
     ? s.status.awake
@@ -613,7 +629,7 @@ export default function App() {
           : s.status.downloading; // also what the few milliseconds of `checking` say
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
-  const stage = audio || exporting ? 'audio' : transcript || running ? 'text' : 'pick';
+  const stage = audio || job?.kind === 'exporting' ? 'audio' : transcript || running ? 'text' : 'pick';
   // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
   const screen: Screen = stage === 'text' ? view : stage;
   const done = transcript !== '' && !running; // the text can still be copied and saved while claude thinks
@@ -621,9 +637,9 @@ export default function App() {
 
   // Electron takes the window title from the document, so the taskbar can say which screen is open.
   // The page name leads the system title bar, the app name follows it, the way a browser tab reads.
-  const screenTitle = exporting
+  const screenTitle = job?.kind === 'exporting'
     ? s.screen.conversion
-    : converting || progress !== null
+    : job?.kind === 'reading' || job?.kind === 'transcribing'
       ? s.screen.transcription
       : { pick: '', ...s.screen }[screen];
 
@@ -694,8 +710,8 @@ export default function App() {
       lead
       icon={<SparklesIcon />}
       label={s.pill.process}
-      wide={aiTask === 'summary' ? s.pill.processing : undefined}
-      disabled={!done || aiTask !== null}
+      wide={job?.kind === 'ai' && job.task === 'summary' ? s.pill.processing : undefined}
+      disabled={!done || job?.kind === 'ai'}
       onClick={() => runAi('summary')}
     />
   );
@@ -707,8 +723,8 @@ export default function App() {
       lead
       icon={<ListOrderedIcon />}
       label={s.pill.chapters}
-      wide={aiTask === 'chapters' ? s.pill.chaptering : undefined}
-      disabled={!done || segments.length === 0 || aiTask !== null}
+      wide={job?.kind === 'ai' && job.task === 'chapters' ? s.pill.chaptering : undefined}
+      disabled={!done || segments.length === 0 || job?.kind === 'ai'}
       onClick={() => runAi('chapters')}
     />
   );
@@ -743,7 +759,7 @@ export default function App() {
         <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
       ) : (
         // The text scrolls inside its own panel: the top bar, the pill and the progress block stay put.
-        <div className={cn('absolute inset-0 flex flex-col px-6 pt-22', job ? 'pb-33' : 'pb-24')}>
+        <div className={cn('absolute inset-0 flex flex-col px-6 pt-22', bar ? 'pb-33' : 'pb-24')}>
           <div className="mx-auto flex min-h-0 w-170 max-w-full flex-1 flex-col">
             <div className="mb-1.5 flex items-center justify-center gap-2">
               <h1 className="min-w-0 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
@@ -892,13 +908,13 @@ export default function App() {
         </div>
       </div>
 
-      {job && (
+      {bar && (
         <div className="absolute bottom-23 left-1/2 flex w-110 max-w-[calc(100%-3rem)] -translate-x-1/2 flex-col gap-2">
           <div className="flex items-center justify-between gap-4 text-[12.5px] text-muted-foreground">
-            <span>{job.label}</span>
+            <span>{bar.label}</span>
             <div className="flex items-center gap-2.5">
-              {job.value !== undefined && (
-                <b className="font-medium text-foreground tabular-nums">{Math.round(job.value)} %</b>
+              {bar.value !== undefined && (
+                <b className="font-medium text-foreground tabular-nums">{Math.round(bar.value)} %</b>
               )}
               {running && (
                 <Button
@@ -909,7 +925,7 @@ export default function App() {
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                   // Only a run that is decoding has something to lose; reading the file or encoding a track
                   // stops without a word.
-                  onClick={() => (progress === null ? stop() : setConfirming(true))}
+                  onClick={() => (job?.kind === 'transcribing' ? setConfirming(true) : stop())}
                 >
                   <XIcon className="size-3.5" />
                 </Button>
@@ -919,13 +935,13 @@ export default function App() {
           <div
             className="h-1.5 overflow-hidden rounded-full bg-muted"
             role="progressbar"
-            aria-label={job.label}
-            {...(job.value !== undefined && {
-              'aria-valuenow': Math.round(job.value),
-              'aria-valuetext': `${Math.round(job.value)} %`,
+            aria-label={bar.label}
+            {...(bar.value !== undefined && {
+              'aria-valuenow': Math.round(bar.value),
+              'aria-valuetext': `${Math.round(bar.value)} %`,
             })}
           >
-            {job.value === undefined ? (
+            {bar.value === undefined ? (
               // No percentage to promise: a short bar crossing the track, instead of a full one that looks done.
               <div className="h-full w-2/5 animate-indeterminate rounded-full bg-foreground" />
             ) : (
@@ -935,7 +951,7 @@ export default function App() {
                   'after:absolute after:inset-0 after:animate-sheen after:bg-linear-to-r',
                   'after:from-transparent after:via-white/35 after:to-transparent',
                 )}
-                style={{ width: `${job.value}%` }}
+                style={{ width: `${bar.value}%` }}
               />
             )}
           </div>
