@@ -30,6 +30,7 @@ const plural = (n: number, one: string, few: string, many: string): string =>
       : many;
 
 const uk = {
+  locale: 'uk', // for toLocaleString: the decimal comma, and the group separators that come with it
   sizes: ['Б', 'КБ', 'МБ', 'ГБ'],
   words: (n: number): string => `${n} ${plural(n, 'слово', 'слова', 'слів')}`,
   cues: (n: number): string => `${n} ${plural(n, 'репліка', 'репліки', 'реплік')}`,
@@ -46,6 +47,7 @@ const uk = {
     dropHint: 'MP4, MKV, MOV, MP3, WAV та інші',
     dropPick: 'Вибрати файл',
     saveTrack: 'Зберегти аудіодоріжку .ogg',
+    downloadModel: 'Завантажити модель',
     audioReady: 'Аудіодоріжку витягнуто. Збережи її або запусти транскрибацію.',
     transcribedIn: (time: string, words: string): string => ` · розшифровано за ${time} · ${words}`,
   },
@@ -87,6 +89,7 @@ const uk = {
     modelReady: 'Модель готова',
     preparing: 'Готую модель',
     downloading: 'Завантажую модель',
+    modelAbsent: 'Модель не завантажена',
   },
 
   toast: {
@@ -96,6 +99,7 @@ const uk = {
     stopped: 'Зупинено',
     stoppedAt: (time: string): string => `Зупинено на ${time} — можна продовжити`,
     transcribed: (words: string): string => `Транскрибація завершена — ${words}`,
+    modelDeleted: 'Модель видалено — наступного разу застосунок спитає знову',
   },
 
   pill: {
@@ -149,6 +153,31 @@ const uk = {
     ],
   },
 
+  // The one thing the app downloads by itself, so it is asked for out loud — and only when the weights are not
+  // in the cache already, because loading a cached model downloads nothing.
+  modelDialog: {
+    title: 'Завантажити модель?',
+    cancel: 'Не зараз',
+    confirm: (size: string): string => `Завантажити ${size}`,
+    body: (name: string, gpu: boolean): string[] => [
+      'MagScribe розшифровує на цій машині, тож їй потрібна модель. Вона завантажується один раз із ' +
+        'huggingface.co і лишається в кеші застосунку — змінити чи видалити її можна в налаштуваннях. Це ' +
+        'єдине, що застосунок завантажує сам.',
+      gpu
+        ? `Для цієї машини рекомендована *${name}*: тут є відеокарта, яка її потягне.`
+        : `Для цієї машини рекомендована *${name}*: розшифровка піде на процесорі, а велика модель там і ` +
+          'повільна, і важка для памʼяті.',
+    ],
+  },
+
+  /** The models themselves: what each is for, and what the row says about it. */
+  model: {
+    small: 'швидша, для процесора',
+    turbo: 'найточніша, для відеокарти',
+    recommended: 'рекомендована',
+    downloaded: 'завантажена',
+  },
+
   ffmpegDialog: {
     title: 'Потрібен ffmpeg',
     cancel: 'Зрозуміло',
@@ -166,6 +195,8 @@ const uk = {
 
   settings: {
     language: 'Мова інтерфейсу',
+    model: 'Модель розпізнавання',
+    deleteModel: 'Видалити',
     promptsHint:
       'Інструкції, які отримує модель. Можна замінити на власні, або підкоригувати за бажанням. Порожнє поле ' +
       'підставить промпт за замовчуванням.',
@@ -174,15 +205,15 @@ const uk = {
     prompt: { summary: 'Конспект — кнопка «Опрацювати»', chapters: 'Таймкоди — для формування розділів' },
   },
 
-  /** `version` is the build, `engine` the adapter line, or null while the model is still loading. */
-  about: (version: string, engine: string | null): string[] => [
+  /** `version` is the build, `model` the one in use, `engine` the adapter line (null while it is loading). */
+  about: (version: string, model: string, engine: string | null): string[] => [
     `*MagScribe ${version}* — транскрибація відео й аудіо: текст, субтитри .srt і таймкоди розділів.`,
-    `Зараз розшифровує Whisper large-v3-turbo на цій машині${engine ? ` *(${engine})*` : ''}, а конспект і ` +
-      'таймкоди пише команда `claude` — тобто транскрипт для них іде в Anthropic.',
+    `Зараз розшифровує ${model} на цій машині${engine ? ` *(${engine})*` : ''}, а конспект і таймкоди пише ` +
+      'команда `claude` — тобто транскрипт для них іде в Anthropic.',
     'Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.',
-    'Модель — *openai/whisper-large-v3-turbo* (MIT) у ONNX-конверсії onnx-community; звук читає системний ' +
-      '`ffmpeg`. Умови сторонніх компонентів — у файлі *THIRD-PARTY-LICENSES.md* поруч із застосунком. Сам ' +
-      'MagScribe — під MIT.',
+    'Моделі — *openai/whisper* (MIT) у ONNX-конверсії onnx-community: large-v3-turbo для відеокарти і small ' +
+      'для процесора; звук читає системний `ffmpeg`. Умови сторонніх компонентів — у файлі ' +
+      '*THIRD-PARTY-LICENSES.md* поруч із застосунком. Сам MagScribe — під MIT.',
   ],
 
   /** Names in the system's own open dialog. */
@@ -207,6 +238,7 @@ const uk = {
 };
 
 const en: typeof uk = {
+  locale: 'en',
   sizes: ['B', 'KB', 'MB', 'GB'],
   words: (n: number): string => `${n} word${n === 1 ? '' : 's'}`,
   cues: (n: number): string => `${n} cue${n === 1 ? '' : 's'}`,
@@ -223,6 +255,7 @@ const en: typeof uk = {
     dropHint: 'MP4, MKV, MOV, MP3, WAV and others',
     dropPick: 'Choose a file',
     saveTrack: 'Save the audio track as .ogg',
+    downloadModel: 'Download the model',
     audioReady: 'The audio track is out. Save it, or start the transcription.',
     transcribedIn: (time: string, words: string): string => ` · transcribed in ${time} · ${words}`,
   },
@@ -263,6 +296,7 @@ const en: typeof uk = {
     modelReady: 'The model is ready',
     preparing: 'Getting the model ready',
     downloading: 'Downloading the model',
+    modelAbsent: 'The model is not downloaded',
   },
 
   toast: {
@@ -272,6 +306,7 @@ const en: typeof uk = {
     stopped: 'Stopped',
     stoppedAt: (time: string): string => `Stopped at ${time} — you can carry on from there`,
     transcribed: (words: string): string => `Transcription finished — ${words}`,
+    modelDeleted: 'The model is deleted — the app will ask again next time',
   },
 
   pill: {
@@ -324,6 +359,28 @@ const en: typeof uk = {
     ],
   },
 
+  modelDialog: {
+    title: 'Download the model?',
+    cancel: 'Not now',
+    confirm: (size: string): string => `Download ${size}`,
+    body: (name: string, gpu: boolean): string[] => [
+      'MagScribe transcribes on this machine, so it needs a model. It is downloaded once from huggingface.co ' +
+        'and stays in the app cache — the settings window changes it or deletes it again. This is the only ' +
+        'thing the app downloads by itself.',
+      gpu
+        ? `For this machine the recommended one is *${name}*: there is a graphics card here to carry it.`
+        : `For this machine the recommended one is *${name}*: the transcription runs on the processor, where ` +
+          'the large model is both slow and heavy on memory.',
+    ],
+  },
+
+  model: {
+    small: 'faster, for the processor',
+    turbo: 'most accurate, for the graphics card',
+    recommended: 'recommended',
+    downloaded: 'downloaded',
+  },
+
   ffmpegDialog: {
     title: 'ffmpeg is needed',
     cancel: 'Understood',
@@ -341,22 +398,24 @@ const en: typeof uk = {
 
   settings: {
     language: 'Interface language',
+    model: 'Speech model',
+    deleteModel: 'Delete',
     promptsHint:
       'The instructions the model gets. Replace them with your own, or tweak them as you like. An empty field ' +
       'falls back to the built-in prompt.',
     reset: 'Reset',
-    prompt: { summary: 'Summary — the «Process» button', chapters: 'Chapters — for building the sections' },
+    prompt: { summary: 'Summary — the “Process” button', chapters: 'Chapters — for building the sections' },
   },
 
-  about: (version: string, engine: string | null): string[] => [
+  about: (version: string, model: string, engine: string | null): string[] => [
     `*MagScribe ${version}* — transcription of video and audio: text, .srt subtitles and chapter timecodes.`,
-    `Right now Whisper large-v3-turbo does the transcription on this machine${engine ? ` *(${engine})*` : ''}, ` +
-      'while the summary and the chapters are written by the `claude` command — so the transcript goes to ' +
-      'Anthropic for those two.',
+    `Right now ${model} does the transcription on this machine${engine ? ` *(${engine})*` : ''}, while the ` +
+      'summary and the chapters are written by the `claude` command — so the transcript goes to Anthropic for ' +
+      'those two.',
     'A choice of engine for both steps — local or cloud — is coming to the settings.',
-    'The model is *openai/whisper-large-v3-turbo* (MIT) in the ONNX conversion by onnx-community; the sound is ' +
-      'read by the system `ffmpeg`. The terms of the third-party components are in *THIRD-PARTY-LICENSES.md* ' +
-      'next to the app. MagScribe itself is under MIT.',
+    'The models are *openai/whisper* (MIT) in the ONNX conversion by onnx-community: large-v3-turbo for the ' +
+      'graphics card and small for the processor; the sound is read by the system `ffmpeg`. The terms of the ' +
+      'third-party components are in *THIRD-PARTY-LICENSES.md* next to the app. MagScribe itself is under MIT.',
   ],
 
   filter: { video: 'Video', audio: 'Audio', all: 'All files' },
@@ -370,7 +429,7 @@ const en: typeof uk = {
     claudeTimeout: (seconds: number): string => `claude did not finish within ${seconds} seconds`,
     adapterNull: 'requestAdapter() returned null',
     unknownAdapter: 'unknown adapter',
-    softwareAdapter: (label: string): string => `software adapter «${label}» instead of a graphics card`,
+    softwareAdapter: (label: string): string => `software adapter “${label}” instead of a graphics card`,
     modelNotLoaded: 'The model is not loaded yet',
     workerFailed: 'The worker did not start',
     gpuGone: (reason: string, code: number): string => `The GPU process exited (${reason}, code ${code})`,
@@ -392,3 +451,11 @@ export const setUiLang = (lang: UiLang): void => {
 };
 
 export const t = (): Strings => STRINGS[current];
+
+/** `1,4 ГБ` / `1.4 GB`. A decimal only where it says something: past 100 of anything it is noise. */
+export const formatSize = (bytes: number, s: Strings): string => {
+  const power = bytes > 0 ? Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), s.sizes.length - 1) : 0;
+  const value = bytes / 1024 ** power;
+  const digits = power === 0 || value >= 100 ? 0 : 1;
+  return `${value.toLocaleString(s.locale, { maximumFractionDigits: digits })} ${s.sizes[power]}`;
+};

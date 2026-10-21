@@ -25,12 +25,15 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
+import { findGpu, isRealGpu, type Gpu } from '@/gpu';
+import { formatSize, pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
+import { cachedModels, deleteModel, modelBytes, MODELS, MODEL_IDS, recommendedModel, type ModelId } from '@/models';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
+  ModelPicker,
   SettingsDialog,
   readPrompts,
   readSetting,
@@ -42,12 +45,6 @@ import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
 import type { Language, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
-const formatSize = (bytes: number, units: string[]): string => {
-  const power = bytes > 0 ? Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1) : 0;
-  const value = bytes / 1024 ** power;
-  return `${power === 0 ? value : value.toFixed(1)} ${units[power]}`;
-};
-
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 // Only a line that starts with a timecode is a chapter: a preamble or an empty numbering from the model
@@ -55,12 +52,14 @@ const countWords = (text: string): number => (text.trim() ? text.trim().split(/\
 const countChapters = (text: string): number =>
   text.split('\n').filter((line) => /^\s*\d{1,2}:\d\d/.test(line)).length;
 
-// A token at a time would re-render the whole window while the GPU is busy. `result` always repaints the final
-// text, so the frames dropped in between cost nothing.
-const PAINT_EVERY_MS = 150;
+// A token at a time would re-render the whole window while the GPU is busy, and the later a long run gets, the
+// more text each repaint lays out. Twice a second still reads as streaming, and `result` repaints the final
+// text in full, so the frames dropped in between cost nothing.
+const PAINT_EVERY_MS = 500;
 
 const THEME_KEY = 'theme';
 const LANG_KEY = 'lang';
+const MODEL_KEY = 'model';
 
 // The labels live in i18n, keyed by the same value — `s.theme[value]`.
 const themes: { value: Theme; Icon: typeof SunIcon }[] = [
@@ -109,6 +108,17 @@ const PillButton = ({ icon, label, wide, lead, disabled, onClick }: PillProps) =
   </Button>
 );
 
+/** The one-line offer under the status: retry a load that failed, or ask for the model that is not there. */
+const StatusLink = ({ label, onClick }: { label: string; onClick: () => void }) => (
+  <button
+    type="button"
+    className="w-fit text-[11px] underline underline-offset-2 opacity-90 hover:opacity-100"
+    onClick={onClick}
+  >
+    {label}
+  </button>
+);
+
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Job = { label: string; value?: number };
 
@@ -125,6 +135,13 @@ export default function App() {
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the claude CLI gets
   const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
+  // Which model this window works with, which ones are already on disk, and what the machine can run. `modelId`
+  // is null only for the moment the adapter is being probed, before anything decides anything.
+  const [modelId, setModelId] = useState<ModelId | null>(null);
+  const [cached, setCached] = useState<ModelId[]>([]);
+  const [gpu, setGpu] = useState<Gpu | null>(null);
+  const [started, setStarted] = useState(false); // a worker was spawned, i.e. the download was agreed to
+  const [askModel, setAskModel] = useState<ModelId | null>(null); // the «download the model?» window, and for which
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
@@ -153,6 +170,8 @@ export default function App() {
   const [ffmpegReady, setFfmpegReady] = useState(true);
 
   const s = STRINGS[uiLang]; // every line this window shows
+  const fp16 = gpu?.fp16 === true; // which of the two download sizes is the real one here
+  const recommended = recommendedModel(isRealGpu(gpu));
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
   const speech: { value: Language; label: string; title: string }[] = [
@@ -176,12 +195,13 @@ export default function App() {
 
   // Spawned on mount, and again after a stop: terminating is the only way out of a run, and it takes the
   // loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
-  const spawnWorker = (): void => {
+  const spawnWorker = (id: ModelId): void => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     workerRef.current = worker;
     ready.current = false;
     setModel(null);
     setDownload(0);
+    setStarted(true);
 
     worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       const message = event.data;
@@ -189,6 +209,8 @@ export default function App() {
       if (message.type === 'ready') {
         setDownload(100);
         setModel({ adapter: message.adapter, encoder: message.encoder });
+        // It is on disk now, so the settings window stops offering to download what is already here.
+        setCached((have) => (have.includes(id) ? have : [...have, id]));
         ready.current = true;
       }
       if (message.type === 'fallback') setFallback(s.error.fallback(message.from, message.reason));
@@ -228,14 +250,26 @@ export default function App() {
     // A worker that fails to load its own module never posts anything, and the window would wait forever.
     worker.addEventListener('error', (event) => setModelError(event.message || s.error.workerFailed));
 
-    worker.postMessage({ type: 'load', lang: uiLang } satisfies WorkerRequest);
+    worker.postMessage({ type: 'load', lang: uiLang, model: id } satisfies WorkerRequest);
   };
 
-  // Mount only, and deliberately: one worker per window, and spawnWorker is re-created on every render. Its
-  // setState calls are how a loading model reaches the screen — that is this effect's job, not a cascade.
+  // Mount only, and deliberately: one worker per window, and spawnWorker is re-created on every render.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-    spawnWorker();
+    // What this machine has, and what it already holds. A model in the cache loads without touching the
+    // network, so there is nothing to ask about; an empty cache means a download, and that is the person's
+    // call — see docs/concept.md. With nothing chosen yet, the adapter decides which one is offered.
+    void Promise.all([findGpu(), cachedModels()]).then(([adapter, have]) => {
+      const fits = recommendedModel(isRealGpu(adapter));
+      // With nothing chosen yet: what this machine should run, unless it is not here and another one is —
+      // downloading a second model while the first sits in the cache helps nobody.
+      const first = have.length === 0 || have.includes(fits) ? fits : have[0];
+      const pick = readSetting(MODEL_KEY, MODEL_IDS, first);
+      setGpu(adapter);
+      setCached(have);
+      setModelId(pick);
+      if (have.includes(pick)) spawnWorker(pick);
+      else setAskModel(pick);
+    });
 
     void window.api.hasFfmpeg().then(setFfmpegReady);
     window.api.onAudioProgress(setConversion);
@@ -328,7 +362,7 @@ export default function App() {
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
     // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
     workerRef.current?.terminate();
-    spawnWorker();
+    if (modelId) spawnWorker(modelId);
 
     // Where the text got to: the run can pick up there instead of starting the file over.
     const reached = covered.current;
@@ -389,6 +423,53 @@ export default function App() {
       setProgress(null);
     } finally {
       setConverting(false);
+    }
+  };
+
+  /** Starts the run, or arranges for it: the model may still be loading, or not be downloaded at all yet. */
+  const startOrWait = (from?: number): void => {
+    pendingFrom.current = from;
+    if (model) {
+      void startTranscription(from);
+      return;
+    }
+    setPending(true);
+    if (!started && modelId) setAskModel(modelId); // nothing loading yet: ask before anything is downloaded
+  };
+
+  /**
+   * Makes `id` the model of this window: loaded straight away when it is on disk, asked about when it is not.
+   * A model that still has to be downloaded is not remembered until the download is agreed to — otherwise
+   * «Not now» would leave the window pointing at a model it does not have.
+   */
+  const chooseModel = (id: ModelId): void => {
+    if (!cached.includes(id)) {
+      setAskModel(id);
+      return;
+    }
+    setModelId(id);
+    writeSetting(MODEL_KEY, id);
+    setAskModel(null);
+    spawnWorker(id);
+  };
+
+  /** Yes to the download — of whichever model the question ended up offering, which is also the one kept. */
+  const allowModel = (): void => {
+    if (askModel === null) return;
+    const id = askModel;
+    setAskModel(null);
+    setModelId(id);
+    writeSetting(MODEL_KEY, id);
+    spawnWorker(id);
+  };
+
+  const forgetModel = async (id: ModelId): Promise<void> => {
+    try {
+      await deleteModel(id);
+      setCached((have) => have.filter((kept) => kept !== id));
+      toast.success(s.toast.modelDeleted);
+    } catch (error) {
+      failWith(error);
     }
   };
 
@@ -489,7 +570,18 @@ export default function App() {
   }, [pending, model, busy]);
 
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
-  const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
+  // `checking` lasts a few milliseconds, until the adapter probe and the cache lookup come back.
+  const modelStage = modelId === null
+    ? 'checking'
+    : !started
+      ? 'absent'
+      : modelError
+        ? 'failed'
+        : model
+          ? 'ready'
+          : download >= 100
+            ? 'preparing'
+            : 'downloading';
 
   const job: Job | null = exporting || savingTrack
     ? { label: s.job.audioFile, value: conversion }
@@ -514,9 +606,11 @@ export default function App() {
       ? transcript || audio
         ? s.status.done
         : s.status.modelReady
-      : modelStage === 'preparing'
-        ? s.status.preparing
-        : s.status.downloading;
+      : modelStage === 'absent'
+        ? s.status.modelAbsent
+        : modelStage === 'preparing'
+          ? s.status.preparing
+          : s.status.downloading; // also what the few milliseconds of `checking` say
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
   const stage = audio || exporting ? 'audio' : transcript || running ? 'text' : 'pick';
@@ -566,7 +660,7 @@ export default function App() {
           <FileVideoIcon className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-[13.5px] font-medium">{file.name}</span>
-            <span className="text-xs text-muted-foreground">{formatSize(file.size, s.sizes)}</span>
+            <span className="text-xs text-muted-foreground">{formatSize(file.size, s)}</span>
           </div>
         </div>
       )}
@@ -626,11 +720,7 @@ export default function App() {
       label={s.pill.transcribe}
       wide={busy && stage === 'text' ? s.pill.transcribing : pending ? s.pill.waitingForModel : undefined}
       disabled={!file || busy || pending || modelStage === 'failed'}
-      onClick={() => {
-        pendingFrom.current = undefined;
-        if (model) void startTranscription();
-        else setPending(true);
-      }}
+      onClick={() => startOrWait()}
     />
   );
 
@@ -693,8 +783,8 @@ export default function App() {
                   : screen === 'chapters'
                     ? `${s.screen.chapters} · ${s.chapters(countChapters(chapters))}`
                     : audio
-                      ? `OGG · Opus · ${formatSize(audio.size, s.sizes)}`
-                      : file && `${formatSize(file.size, s.sizes)} · ${extension.toUpperCase()}`}
+                      ? `OGG · Opus · ${formatSize(audio.size, s)}`
+                      : file && `${formatSize(file.size, s)} · ${extension.toUpperCase()}`}
               {screen === 'transcript' &&
                 elapsed !== null &&
                 s.ui.transcribedIn(timecode(elapsed), s.words(countWords(transcript)))}
@@ -869,16 +959,15 @@ export default function App() {
         >
           <span>{modelError ?? status}</span>
           {modelError ? (
-            <button
-              type="button"
-              className="w-fit text-[11px] underline underline-offset-2 opacity-90 hover:opacity-100"
+            <StatusLink
+              label={s.ui.retry}
               onClick={() => {
                 setModelError(null);
-                spawnWorker();
+                if (modelId) spawnWorker(modelId);
               }}
-            >
-              {s.ui.retry}
-            </button>
+            />
+          ) : modelStage === 'absent' && modelId ? (
+            <StatusLink label={s.ui.downloadModel} onClick={() => setAskModel(modelId)} />
           ) : (
             model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>
           )}
@@ -916,11 +1005,7 @@ export default function App() {
                   icon={<PlayIcon />}
                   label={s.pill.resumeFrom(timecode(resumeAt))}
                   disabled={!file || busy || pending || modelStage === 'failed'}
-                  onClick={() => {
-                    pendingFrom.current = resumeAt;
-                    if (model) void startTranscription(resumeAt);
-                    else setPending(true);
-                  }}
+                  onClick={() => startOrWait(resumeAt)}
                 />
               )}
               {segments.length > 0 && (
@@ -1017,6 +1102,31 @@ export default function App() {
         }}
       />
       <ConfirmDialog
+        open={askModel !== null}
+        title={s.modelDialog.title}
+        cancel={s.modelDialog.cancel}
+        confirm={s.modelDialog.confirm(formatSize(modelBytes(askModel ?? recommended, fp16), s))}
+        close={s.ui.close}
+        body={s.modelDialog.body(MODELS[recommended].name, isRealGpu(gpu))}
+        tone="default"
+        onConfirm={allowModel}
+        // «Not now» also calls off a click that was waiting for the model it just declined.
+        onClose={() => {
+          setAskModel(null);
+          setPending(false);
+        }}
+      >
+        <ModelPicker
+          s={s}
+          value={askModel ?? recommended}
+          cached={cached}
+          recommended={recommended}
+          fp16={fp16}
+          busy={false}
+          onChange={setAskModel}
+        />
+      </ConfirmDialog>
+      <ConfirmDialog
         open={noFfmpeg !== null}
         title={s.ffmpegDialog.title}
         cancel={s.ffmpegDialog.cancel}
@@ -1039,6 +1149,13 @@ export default function App() {
         s={s}
         lang={uiLang}
         onLang={setUiLangState}
+        model={modelId ?? recommended}
+        models={cached}
+        recommended={recommended}
+        fp16={fp16}
+        modelBusy={busy || modelStage === 'downloading' || modelStage === 'preparing'}
+        onModel={chooseModel}
+        onDeleteModel={(id) => void forgetModel(id)}
         prompts={prompts}
         onPrompts={setPrompts}
         onClose={() => setDialog(null)}
@@ -1046,6 +1163,7 @@ export default function App() {
       <AboutDialog
         open={dialog === 'about'}
         s={s}
+        model={MODELS[modelId ?? recommended].name}
         engine={model && `${model.adapter} · ${model.encoder}`}
         onClose={() => setDialog(null)}
       />

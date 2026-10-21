@@ -1,8 +1,9 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { XIcon } from 'lucide-react';
+import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
+import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
+import { modelBytes, MODEL_IDS, MODELS, type ModelId } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
@@ -112,17 +113,106 @@ function Modal({ open, title, close, onClose, children }: ModalProps) {
   );
 }
 
+type PickerProps = {
+  s: Strings;
+  value: ModelId;
+  cached: ModelId[];
+  recommended: ModelId;
+  fp16: boolean; // what the adapter reported: it decides which of the two download sizes is the real one
+  busy: boolean; // a model is loading or working, so this is no moment to delete or swap it
+  onChange: (id: ModelId) => void;
+  onDelete?: (id: ModelId) => void; // only the settings window offers it; the first-run question has nothing to delete
+};
+
+/** The two models, with what each would cost here. Used by the settings window and by the first-run question. */
+export function ModelPicker({ s, value, cached, recommended, fp16, busy, onChange, onDelete }: PickerProps) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {MODEL_IDS.map((id) => (
+        <div
+          key={id}
+          className={cn(
+            'flex items-center gap-2 rounded-[10px] border px-3 py-2 transition-colors',
+            value === id ? 'border-foreground/40 bg-muted' : 'hover:bg-muted/40',
+          )}
+        >
+          <button
+            type="button"
+            aria-pressed={value === id}
+            disabled={busy}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-60"
+            onClick={() => onChange(id)}
+          >
+            {/* The tick, not the shading, is what says «this is the one in use» at a glance. */}
+            <CheckIcon className={cn('size-4 shrink-0', value === id ? 'opacity-100' : 'opacity-0')} />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] font-medium">
+                {MODELS[id].name}
+                {cached.includes(id) ? (
+                  <span className="ml-2 text-[11px] font-normal text-muted-foreground">{s.model.downloaded}</span>
+                ) : (
+                  id === recommended && (
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      {s.model.recommended}
+                    </span>
+                  )
+                )}
+              </span>
+              <span className="text-[11.5px] text-muted-foreground">
+                {s.model[id]} · ≈ {formatSize(modelBytes(id, fp16), s)}
+              </span>
+            </span>
+          </button>
+          {onDelete && cached.includes(id) && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="shrink-0 text-muted-foreground"
+              disabled={busy}
+              onClick={() => onDelete(id)}
+            >
+              {s.settings.deleteModel}
+            </Button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type SettingsProps = {
   open: boolean;
   s: Strings;
   lang: UiLang;
   onLang: (lang: UiLang) => void;
+  model: ModelId;
+  models: ModelId[]; // which ones are on disk
+  recommended: ModelId;
+  fp16: boolean;
+  modelBusy: boolean; // the model is loading or working: swapping or deleting it mid-run is nobody's intent
+  onModel: (id: ModelId) => void;
+  onDeleteModel: (id: ModelId) => void;
   prompts: Prompts;
   onPrompts: (prompts: Prompts) => void;
   onClose: () => void;
 };
 
-export function SettingsDialog({ open, s, lang, onLang, prompts, onPrompts, onClose }: SettingsProps) {
+export function SettingsDialog({
+  open,
+  s,
+  lang,
+  onLang,
+  model,
+  models,
+  recommended,
+  fp16,
+  modelBusy,
+  onModel,
+  onDeleteModel,
+  prompts,
+  onPrompts,
+  onClose,
+}: SettingsProps) {
   return (
     <Modal open={open} title={s.ui.settings} close={s.ui.close} onClose={onClose}>
       <div className="flex flex-col gap-5">
@@ -146,6 +236,20 @@ export function SettingsDialog({ open, s, lang, onLang, prompts, onPrompts, onCl
               </Button>
             ))}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] font-medium">{s.settings.model}</span>
+          <ModelPicker
+            s={s}
+            value={model}
+            cached={models}
+            recommended={recommended}
+            fp16={fp16}
+            busy={modelBusy}
+            onChange={onModel}
+            onDelete={onDeleteModel}
+          />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -191,19 +295,32 @@ type ConfirmProps = {
   confirm: string;
   close: string;
   body: string[];
+  children?: ReactNode; // what the question needs besides words — the model picker, so far
   tone?: 'destructive' | 'default'; // destructive by default: most of these questions cost something
   onConfirm: () => void;
   onClose: () => void;
 };
 
 /** The one question the app asks before something it cannot take back. Esc and the backdrop mean «no». */
-export function ConfirmDialog({ open, title, cancel, confirm, close, body, tone = 'destructive', onConfirm, onClose }: ConfirmProps) {
+export function ConfirmDialog({
+  open,
+  title,
+  cancel,
+  confirm,
+  close,
+  body,
+  children,
+  tone = 'destructive',
+  onConfirm,
+  onClose,
+}: ConfirmProps) {
   return (
     <Modal open={open} title={title} close={close} onClose={onClose}>
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2.5 text-[13px] leading-[1.6] text-muted-foreground">
           {paragraphs(body)}
         </div>
+        {children}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="lg" className="px-4" onClick={onClose}>
             {cancel}
@@ -221,18 +338,20 @@ export function ConfirmDialog({ open, title, cancel, confirm, close, body, tone 
 export function AboutDialog({
   open,
   s,
+  model,
   engine,
   onClose,
 }: {
   open: boolean;
   s: Strings;
+  model: string; // the name of the model this window works with
   engine: string | null;
   onClose: () => void;
 }) {
   return (
     <Modal open={open} title={s.ui.about} close={s.ui.close} onClose={onClose}>
       <div className="flex flex-col gap-3 text-[13px] leading-[1.6] text-muted-foreground">
-        {paragraphs(s.about(__APP_VERSION__, engine))}
+        {paragraphs(s.about(__APP_VERSION__, model, engine))}
       </div>
     </Modal>
   );

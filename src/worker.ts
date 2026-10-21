@@ -6,11 +6,12 @@ import {
   type AutomaticSpeechRecognitionPipeline,
   type ProgressInfo,
 } from '@huggingface/transformers';
+import { findGpu } from './gpu';
 import { setUiLang, t, type UiLang } from './i18n';
+import { MODELS, type ModelId } from './models';
 import { SAMPLE_RATE } from './pcm';
 import { toSegments, type Segment } from './subtitles';
 
-const MODEL_ID = 'onnx-community/whisper-large-v3-turbo';
 const CHUNK_LENGTH_S = 30;
 const STRIDE_LENGTH_S = 5;
 const JUMP_S = CHUNK_LENGTH_S - 2 * STRIDE_LENGTH_S; // new audio each chunk adds; the rest overlaps its neighbours
@@ -23,7 +24,7 @@ export type Language = 'uk' | 'en' | null;
 // `lang` is the interface language, for the few messages of ours that reach the screen — not the speech one.
 // It arrives with `load` only: a worker is spawned on mount and after every stop, which is often enough.
 export type WorkerRequest =
-  | { type: 'load'; lang: UiLang }
+  | { type: 'load'; lang: UiLang; model: ModelId }
   | { type: 'transcribe'; audio: Float32Array; language: Language };
 
 export type WorkerResponse =
@@ -37,7 +38,8 @@ export type WorkerResponse =
   | { type: 'result'; text: string; segments: Segment[] }
   | { type: 'error'; message: string };
 
-// Quantisation per this checkpoint's model card: fp16 encoder + q4 decoder on WebGPU; without shader-f16 the
+// Quantisation per the model cards, and the same pair for both of them: fp16 encoder + q4 decoder on WebGPU;
+// without shader-f16 the
 // encoder goes 4-bit too, because the fp32 encoder keeps its weights in a 2.5 GB side file. On wasm both halves
 // are 4-bit: the int8 decoder fails to load there with a missing scale. The int8-vs-q4 timings in the git history
 // were taken on SwiftShader, not on a GPU, so treat them as CPU numbers.
@@ -46,23 +48,13 @@ const Q4: Dtype = { encoder_model: 'q4', decoder_model_merged: 'q4' };
 
 type Picked = { adapter: string; dtype: Dtype };
 
-// SwiftShader is the software Vulkan that ships inside Electron. It answers requestAdapter() like a real card, so
-// without this check the app said "WebGPU" for weeks while every matmul ran on the CPU inside the GPU process.
-// Refusing it drops us to wasm, which is just as slow but tells the truth in the status line.
-const SOFTWARE_ADAPTER = /swiftshader|llvmpipe|lavapipe|warp/i;
-
+// A software adapter is refused rather than used: it is just as slow as wasm and it lies in the status line.
 const pickWebGpu = async (): Promise<Picked> => {
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) throw new Error(t().error.adapterNull);
+  const gpu = await findGpu();
+  if (!gpu) throw new Error(t().error.adapterNull);
+  if (gpu.software) throw new Error(t().error.softwareAdapter(gpu.label));
 
-  const { vendor, architecture, description, isFallbackAdapter } = adapter.info;
-  const label = [vendor, architecture].filter(Boolean).join(' ') || description || t().error.unknownAdapter;
-  if (isFallbackAdapter || SOFTWARE_ADAPTER.test(`${vendor} ${architecture} ${description}`)) {
-    throw new Error(t().error.softwareAdapter(label));
-  }
-
-  const fp16 = adapter.features.has('shader-f16');
-  return { adapter: `WebGPU · ${label}`, dtype: fp16 ? { ...Q4, encoder_model: 'fp16' } : Q4 };
+  return { adapter: `WebGPU · ${gpu.label}`, dtype: gpu.fp16 ? { ...Q4, encoder_model: 'fp16' } : Q4 };
 };
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
@@ -74,14 +66,14 @@ const reportDownload = (info: ProgressInfo): void => {
   if (info.status === 'progress_total') post({ type: 'download', progress: info.progress });
 };
 
-const load = async (): Promise<void> => {
+const load = async (model: ModelId): Promise<void> => {
   // WebGPU first; fall through to wasm both when the API is missing and when the backend fails to start.
   const devices: Device[] = 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
 
   for (const device of devices) {
     try {
       const picked: Picked = device === 'webgpu' ? await pickWebGpu() : { adapter: 'CPU · wasm', dtype: Q4 };
-      transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
+      transcriber = await pipeline('automatic-speech-recognition', MODELS[model].repo, {
         device,
         dtype: picked.dtype,
         progress_callback: reportDownload,
@@ -153,7 +145,7 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   if (request.type === 'load') setUiLang(request.lang);
-  const done = request.type === 'load' ? load() : transcribe(request.audio, request.language);
+  const done = request.type === 'load' ? load(request.model) : transcribe(request.audio, request.language);
 
   done.catch((error: unknown) => {
     post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
