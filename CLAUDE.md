@@ -69,6 +69,12 @@ Local-first desktop app: converts video/audio files and transcribes them. Transc
 - Never judge the GPU from a run started inside Claude's shell. That shell is an FHS sandbox with its own tmpfs `/etc` (the host's is read-only at `/.host-etc`), and it carries no `vulkan` entry, so Dawn there always reports `vkCreateInstance: Found no drivers!` and falls back to SwiftShader no matter how healthy the host is. Check `/.host-etc/vulkan/icd.d/nvidia_icd.json` for the real state, and let the developer run the app from their own session.
 - A run that sits at 0 % for many minutes with the GPU process (not the renderer) at ~500 % CPU was SwiftShader JIT-compiling shaders on the CPU; on a real GPU the first run still compiles, but not for that long. Chromium's per-cache 6 MB cap on `DawnWebGPUCache` is real and `gpu-disk-cache-size-kb` in `main.ts` raises it, but the cache only helps once the adapter is a real GPU. Diagnose with `ps -T -p <gpu pid>`: threads named `Thread<NN>` are SwiftShader's workers.
 - During a transcription do not touch `src/`: Forge restarts Electron on every main/preload change and Vite reloads the renderer on every renderer change, either of which kills the run and, on a first run, leaves the shader cache unwritten. `.direnv` is excluded from Vite's watcher in `vite.renderer.config.mts` for the same reason.
+- **int8 has no WebGPU kernels, and the status line cannot tell you that.** onnxruntime's WebGPU backend runs q4
+  natively (`MatMulNBits`) but has nothing for the int8 integer matmuls, so those nodes execute on the CPU inside
+  the GPU session, with tensors copied across every layer. Measured on an RTX card: `WebGPU` in the status, GPU at
+  8–30 %, CPU at ~20 %, and a file that turbo q4 does in 35 s crawling for minutes. The status line names the
+  adapter the session was created with — not where the operators ended up. This is why `src/models.ts` keys the
+  quantisation by runtime as well as by model: small is int8 on wasm and q4 on a card.
 - **`powerSaveBlocker` is a no-op on Wayland unless a window is focused.** Chromium's Wayland backend hangs the
   inhibitor off the focused surface (`zwp_idle_inhibit_manager`: «Cannot inhibit going idle when no window is
   focused»), while `powerSaveBlocker.isStarted()` still answers `true` — measured on KDE/Wayland, nothing showed

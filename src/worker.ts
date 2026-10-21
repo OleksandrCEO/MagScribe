@@ -8,15 +8,13 @@ import {
 } from '@huggingface/transformers';
 import { findGpu } from './gpu';
 import { setUiLang, t, type UiLang } from './i18n';
-import { MODELS, weightsFor, type ModelId, type Weights } from './models';
+import { MODELS, weightsFor, type Device, type ModelId, type Weights } from './models';
 import { SAMPLE_RATE } from './pcm';
 import { toSegments, type Segment } from './subtitles';
 
 const CHUNK_LENGTH_S = 30;
 const STRIDE_LENGTH_S = 5;
 const JUMP_S = CHUNK_LENGTH_S - 2 * STRIDE_LENGTH_S; // new audio each chunk adds; the rest overlaps its neighbours
-
-export type Device = 'webgpu' | 'wasm';
 
 // null lets Whisper detect the language itself, per 30-second chunk.
 export type Language = 'uk' | 'en' | null;
@@ -50,7 +48,7 @@ const pickWebGpu = async (model: ModelId): Promise<Picked> => {
   if (!gpu) throw new Error(t().error.adapterNull);
   if (gpu.software) throw new Error(t().error.softwareAdapter(gpu.label));
 
-  return { adapter: `WebGPU · ${gpu.label}`, weights: weightsFor(model, gpu.fp16) };
+  return { adapter: `WebGPU · ${gpu.label}`, weights: weightsFor(model, 'webgpu', gpu.fp16) };
 };
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
@@ -71,7 +69,7 @@ const load = async (model: ModelId): Promise<void> => {
       const picked: Picked =
         device === 'webgpu'
           ? await pickWebGpu(model)
-          : { adapter: 'CPU · wasm', weights: weightsFor(model, false) };
+          : { adapter: 'CPU · wasm', weights: weightsFor(model, 'wasm', false) };
       // `bytes` in the pair is for the window to show; the pipeline is given the two quantisations themselves.
       const { encoder_model, decoder_model_merged } = picked.weights;
       transcriber = await pipeline('automatic-speech-recognition', MODELS[model].repo, {

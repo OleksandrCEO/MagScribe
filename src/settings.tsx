@@ -3,7 +3,7 @@ import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
-import { modelBytes, MODEL_IDS, MODELS, type ModelId, type ModelState } from '@/models';
+import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
@@ -118,14 +118,15 @@ type PickerProps = {
   value: ModelId;
   states: Record<ModelId, ModelState>;
   recommended: ModelId;
-  fp16: boolean; // what the adapter reported: it decides which of the two download sizes is the real one
+  device: Device; // webgpu or wasm: together with fp16 it decides which download size is the real one here
+  fp16: boolean;
   busy: boolean; // a model is loading or working, so this is no moment to delete or swap it
   onChange: (id: ModelId) => void;
   onDelete?: (id: ModelId) => void; // only the settings window offers it; the first-run question has nothing to delete
 };
 
 /** The two models, with what each would cost here. Used by the settings window and by the first-run question. */
-export function ModelPicker({ s, value, states, recommended, fp16, busy, onChange, onDelete }: PickerProps) {
+export function ModelPicker({ s, value, states, recommended, device, fp16, busy, onChange, onDelete }: PickerProps) {
   return (
     <div className="flex flex-col gap-1.5">
       {MODEL_IDS.map((id) => (
@@ -161,7 +162,7 @@ export function ModelPicker({ s, value, states, recommended, fp16, busy, onChang
                 </span>
               </span>
               <span className="text-[11.5px] text-muted-foreground">
-                {s.model[id]} · ≈ {formatSize(modelBytes(id, fp16), s)}
+                {s.model[id]} · ≈ {formatSize(modelBytes(id, device, fp16), s)}
               </span>
             </span>
           </button>
@@ -191,6 +192,7 @@ type SettingsProps = {
   model: ModelId;
   states: Record<ModelId, ModelState>; // what the cache holds for each
   recommended: ModelId;
+  device: Device;
   fp16: boolean;
   modelBusy: boolean; // the model is loading or working: swapping or deleting it mid-run is nobody's intent
   onModel: (id: ModelId) => void;
@@ -208,6 +210,7 @@ export function SettingsDialog({
   model,
   states,
   recommended,
+  device,
   fp16,
   modelBusy,
   onModel,
@@ -248,6 +251,7 @@ export function SettingsDialog({
             value={model}
             states={states}
             recommended={recommended}
+            device={device}
             fp16={fp16}
             busy={modelBusy}
             onChange={onModel}

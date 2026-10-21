@@ -164,16 +164,16 @@ const uk = {
         'huggingface.co і лишається в кеші застосунку — змінити чи видалити її можна в налаштуваннях. Це ' +
         'єдине, що застосунок завантажує сам.',
       gpu
-        ? `Для цієї машини рекомендована *${name}*: тут є відеокарта, яка її потягне.`
-        : `Для цієї машини рекомендована *${name}*: розшифровка піде на процесорі, а велика модель там і ` +
-          'повільна, і важка для памʼяті.',
+        ? `Рекомендована *${name}*: тут є відеокарта, яка її потягне.`
+        : `Рекомендована *${name}* — так, на процесорі вона повільна. Менша модель швидша, але помітно ` +
+          'гірше розпізнає українську й технічні слова, і виправити це у вікні вже не вийде.',
     ],
   },
 
   /** The models themselves: what each is for, and what the row says about it. */
   model: {
-    small: 'швидша, для процесора',
-    turbo: 'найточніша, для відеокарти',
+    small: 'швидша, помітно гірша — особливо українською',
+    turbo: 'найточніша; без відеокарти повільна',
     recommended: 'рекомендована',
     downloaded: 'завантажена',
     stale: 'залишки на диску',
@@ -369,15 +369,15 @@ const en: typeof uk = {
         'and stays in the app cache — the settings window changes it or deletes it again. This is the only ' +
         'thing the app downloads by itself.',
       gpu
-        ? `For this machine the recommended one is *${name}*: there is a graphics card here to carry it.`
-        : `For this machine the recommended one is *${name}*: the transcription runs on the processor, where ` +
-          'the large model is both slow and heavy on memory.',
+        ? `The recommended one is *${name}*: there is a graphics card here to carry it.`
+        : `The recommended one is *${name}* — slow on a processor, yes. The smaller model is faster, but it ` +
+          'mishears Ukrainian and technical words badly enough that the text cannot be repaired afterwards.',
     ],
   },
 
   model: {
-    small: 'faster, for the processor',
-    turbo: 'most accurate, for the graphics card',
+    small: 'faster, noticeably worse — especially in Ukrainian',
+    turbo: 'most accurate; slow without a graphics card',
     recommended: 'recommended',
     downloaded: 'downloaded',
     stale: 'leftovers on disk',

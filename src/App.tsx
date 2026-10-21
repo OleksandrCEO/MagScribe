@@ -34,6 +34,7 @@ import {
   MODELS,
   MODEL_IDS,
   recommendedModel,
+  type Device,
   type ModelId,
   type ModelState,
 } from '@/models';
@@ -186,10 +187,11 @@ export default function App() {
   const [ffmpegReady, setFfmpegReady] = useState(true);
 
   const s = STRINGS[uiLang]; // every line this window shows
-  // Which of the two download sizes is the real one here: a software adapter is refused, so it loads the
-  // same weights as a machine with no card at all.
+  // What this machine will load: a software adapter is refused by the worker, so it ends up on wasm like a
+  // machine with no card at all — and that decides both the files and the size the window promises.
+  const device: Device = isRealGpu(gpu) ? 'webgpu' : 'wasm';
   const fp16 = isRealGpu(gpu) && gpu.fp16;
-  const recommended = recommendedModel(isRealGpu(gpu));
+  const recommended = recommendedModel();
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
   const speech: { value: Language; label: string; title: string }[] = [
@@ -281,9 +283,9 @@ export default function App() {
     void (async () => {
       // The adapter first: which files a model would fetch here depends on it, and so does what counts as cached.
       const adapter = await findGpu();
-      const state = await modelStates(isRealGpu(adapter) && adapter.fp16);
+      const state = await modelStates(isRealGpu(adapter) ? 'webgpu' : 'wasm', isRealGpu(adapter) && adapter.fp16);
       const ready = MODEL_IDS.filter((id) => state[id] === 'ready');
-      const fits = recommendedModel(isRealGpu(adapter));
+      const fits = recommendedModel();
       // With nothing chosen yet: what this machine should run, unless it is not here and another one is —
       // downloading a second model while the first sits in the cache helps nobody.
       const first = ready.length === 0 || ready.includes(fits) ? fits : ready[0];
@@ -1137,7 +1139,7 @@ export default function App() {
         open={askModel !== null}
         title={s.modelDialog.title}
         cancel={s.modelDialog.cancel}
-        confirm={s.modelDialog.confirm(formatSize(modelBytes(askModel ?? recommended, fp16), s))}
+        confirm={s.modelDialog.confirm(formatSize(modelBytes(askModel ?? recommended, device, fp16), s))}
         close={s.ui.close}
         body={s.modelDialog.body(MODELS[recommended].name, isRealGpu(gpu))}
         tone="default"
@@ -1153,6 +1155,7 @@ export default function App() {
           value={askModel ?? recommended}
           states={models}
           recommended={recommended}
+          device={device}
           fp16={fp16}
           busy={false}
           onChange={setAskModel}
@@ -1184,6 +1187,7 @@ export default function App() {
         model={modelId ?? recommended}
         states={models}
         recommended={recommended}
+        device={device}
         fp16={fp16}
         modelBusy={busy || modelStage === 'downloading' || modelStage === 'preparing'}
         onModel={chooseModel}
