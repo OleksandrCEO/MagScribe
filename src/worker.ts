@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 /// <reference types="@webgpu/types" />
 import {
+  env,
   pipeline,
   WhisperTextStreamer,
   type AutomaticSpeechRecognitionPipeline,
@@ -11,6 +12,16 @@ import { setUiLang, t, type UiLang } from './i18n';
 import { MODELS, weightsFor, type Device, type ModelId, type Weights } from './models';
 import { SAMPLE_RATE } from './pcm';
 import { toSegments, type Segment } from './subtitles';
+
+// Where onnxruntime takes its own runtime from. Left alone it imports the `.mjs` glue from cdn.jsdelivr.net,
+// which costs the app its offline start and lets a CDN execute code in our window; the files are copied next to
+// the bundle at build time (see vite.renderer.config.mts). `location.href` is the worker's own URL, so this
+// resolves on both `app://bundle` and the dev server's localhost. Setting the prefix also turns off the
+// bundler's own guess for the `.wasm`, which is why both halves live in this one folder.
+// `wasm` is a read-only optional in the types (the same env object serves onnxruntime-node), so only its
+// fields can be set. If it were ever missing, onnxruntime would go back to the CDN — and the CSP would turn
+// that into a loud «no available backend» rather than a quiet download, which is how this was found.
+if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = new URL('/ort/', location.href).href;
 
 const CHUNK_LENGTH_S = 30;
 const STRIDE_LENGTH_S = 5;

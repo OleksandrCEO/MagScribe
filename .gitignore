@@ -122,5 +122,8 @@ Desktop.ini
 # Nothing in here is part of the project.
 playground/
 
+# Copied out of node_modules at build time, see vite.renderer.config.mts
+public/ort/
+
 # Personal working notes, not part of this project
 docs/claude.md
