@@ -245,7 +245,10 @@ export default function App() {
   };
 
   /** Stops whatever is running and keeps whatever it has already produced. */
-  const stop = (): void => {
+  const stop = async (): Promise<void> => {
+    // Nothing decoded yet means nothing to lose, so only a run that has produced text asks first.
+    if (covered.current > 0 && !(await window.api.confirmStop())) return;
+
     stopped.current = true;
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
     // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
@@ -655,7 +658,7 @@ export default function App() {
                   size="icon-xs"
                   title="Зупинити"
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                  onClick={stop}
+                  onClick={() => void stop()}
                 >
                   <XIcon className="size-3.5" />
                 </Button>

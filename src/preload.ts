@@ -14,6 +14,8 @@ const api = {
   extractAudio: (filePath: string, from?: number): Promise<Float32Array> =>
     ipcRenderer.invoke('audio:extract', filePath, from),
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
+  // Asks before a stop that costs something; false means the person changed their mind.
+  confirmStop: (): Promise<boolean> => ipcRenderer.invoke('confirm:stop'),
   // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
   cancelAudio: (): void => ipcRenderer.send('audio:cancel'),
   // Percentage of the extract/export ffmpeg is currently running.

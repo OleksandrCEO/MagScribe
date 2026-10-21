@@ -274,6 +274,25 @@ ipcMain.on('theme:set', (_event, theme: unknown) => {
 // Stopping a run: the renderer kills its own worker, main kills the conversion it may be sitting in.
 ipcMain.on('audio:cancel', cancelFfmpeg);
 
+// Asked before a stop that would cost something. Same native box as the one guarding the window's close.
+ipcMain.handle('confirm:stop', (): boolean => {
+  if (!mainWindow) return true;
+
+  const answer = dialog.showMessageBoxSync(mainWindow, {
+    type: 'question',
+    buttons: ['Хай працює', 'Зупинити'],
+    defaultId: 0,
+    cancelId: 0,
+    message: 'Зупинити транскрибацію?',
+    detail:
+      'Розшифроване лишиться, і прогін можна буде продовжити з місця зупинки.\n\n' +
+      'Але субтитри .srt для цього файлу вже не вийдуть: таймкоди складаються в одне ціле лише наприкінці ' +
+      'повного прогону.',
+  });
+
+  return answer === 1;
+});
+
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));
 
 ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
