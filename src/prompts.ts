@@ -18,6 +18,7 @@ export const SUMMARY_PROMPT = [
   '3. If the text holds agreements, tasks or next steps, add them as a separate list under a short heading of',
   '   its own, written in the same language as the rest.',
   '',
+  'Lists and paragraphs only: no tables and no checkboxes — the window renders neither.',
   'Rely on the text alone and invent nothing. No preamble such as "here is the summary".',
 ].join('\n');
 

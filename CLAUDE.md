@@ -50,8 +50,9 @@ Local-first desktop app: converts video/audio files and transcribes them. Transc
   process read only `/usr/share/vulkan/icd.d` and `/etc/vulkan/icd.d`, never `/nix/store` or `/run/opengl-driver`,
   and it dlopens the driver by soname before the sandbox starts. The nixpkgs manifest points at an absolute store
   path, so inside the sandbox the loader finds no driver and Dawn silently takes SwiftShader (CPU): `requestAdapter()`
-  still succeeds, `shader-f16` is missing, and the GPU process burns 600 % CPU. The manifest is provided by the host
-  config (`/home/config/modules/desktop/nvidia.nix`); the flake still needs `vulkan-loader` for `libvulkan.so.1`.
+  still succeeds, `shader-f16` is missing, and the GPU process burns 600 % CPU. The manifest is provided by the host's
+  own NixOS configuration (its `nvidia.nix`), not by this repository; the flake still needs `vulkan-loader` for
+  `libvulkan.so.1`.
   The only trustworthy check is `nvidia-smi` by PID: our GPU process must be `C+G` with hundreds of MiB, not `G` with
   3 MiB. The full evidence and wrong turns live in git history (`docs/gpu-handoff.md` up to commit `1b9df89`). `ozone-platform=x11` does not help and wrecks
   HiDPI; do not retry it.

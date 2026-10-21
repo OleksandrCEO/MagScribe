@@ -13,7 +13,8 @@ const config: ForgeConfig = {
     // The OFL (fonts) and the MIT/ISC notices have to accompany the app itself, not just the repository, so
     // the file lands next to the binary as <app>/resources/THIRD-PARTY-LICENSES.md. ffmpeg is deliberately
     // not here: the app uses the system's own copy — see src/audio.ts.
-    extraResource: ['./THIRD-PARTY-LICENSES.md'],
+    // icon.png is read at runtime for the window icon: the asar keeps only the bundle (see src/main.ts).
+    extraResource: ['./THIRD-PARTY-LICENSES.md', './assets/icon.png'],
     icon: './assets/icon', // packager appends .ico/.icns per platform
   },
   rebuildConfig: {},

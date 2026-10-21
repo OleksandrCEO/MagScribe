@@ -142,6 +142,8 @@ export const extractAudio = async (filePath: string, onProgress?: OnProgress, fr
   return new Float32Array(pcm.buffer, pcm.byteOffset, samples);
 };
 
+const EXPORT_PREFIX = 'magscribe-'; // what mkdtemp names the export folder, and what the cleanup looks for
+
 // Only one exported track lives at a time: a new export or quitting removes the previous one from temp.
 let lastExport: string | null = null;
 
@@ -156,6 +158,23 @@ export const discardExport = (): void => {
   lastExport = null;
 };
 
+/**
+ * Export folders a crash left behind: `discardExport` runs on the way out, and a process that died another way
+ * never got there. A day old, so a second instance started right now never takes the export of the first.
+ */
+export const discardStaleExports = (): void => {
+  const temp = app.getPath('temp');
+  try {
+    for (const entry of fs.readdirSync(temp)) {
+      if (!entry.startsWith(EXPORT_PREFIX)) continue;
+      const dir = path.join(temp, entry);
+      if (Date.now() - fs.statSync(dir).mtimeMs > 24 * 3600_000) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    // an unreadable temp folder is not worth an error on startup; the leftovers just stay
+  }
+};
+
 /** The file `exportAudio` produced last — the only source `audio:save` agrees to copy out. */
 export const isExport = (filePath: string): boolean => filePath === lastExport;
 
@@ -164,7 +183,7 @@ export const exportAudio = async (filePath: string, onProgress?: OnProgress): Pr
   discardExport();
   // A private directory (0700) rather than a predictable name in a world-readable /tmp: the recording is the
   // user's, and `-y` would happily follow a symlink someone else put there first.
-  const target = path.join(fs.mkdtempSync(path.join(app.getPath('temp'), 'magscribe-')), 'export.ogg');
+  const target = path.join(fs.mkdtempSync(path.join(app.getPath('temp'), EXPORT_PREFIX)), 'export.ogg');
   // ponytail: 64 kbps is plenty for speech and passable for music; raise it if the export is meant for listening
   await runFfmpeg(
     ['-protocol_whitelist', 'file', '-y', '-i', filePath, '-vn', '-c:a', 'libopus', '-b:a', '64k', target],

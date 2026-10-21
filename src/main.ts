@@ -18,7 +18,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
-import { cancelFfmpeg, discardExport, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
+import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
 import { MAX_BROWSER_DECODE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS } from './summary';
@@ -58,6 +58,8 @@ protocol.registerSchemesAsPrivileged([
 if (started) {
   app.quit();
 }
+
+const GPU_LOG_CAP = 64 * 1024; // past this the GPU crash log starts over
 
 const MIN_WIDTH = 640;
 const MIN_HEIGHT = 520;
@@ -125,7 +127,8 @@ const createWindow = () => {
     minHeight: MIN_HEIGHT,
     show: false, // avoid the white flash: shown on ready-to-show below
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff',
-    icon: path.join(__dirname, '../../assets/icon.png'),
+    // The asar holds only the bundle, so the packaged app reads the icon from resources/ (see forge.config.ts).
+    icon: app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '../../assets/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -371,6 +374,7 @@ app.on('ready', () => {
   // re-asserts the saved choice a moment later, but by then the window must not have flashed white.
   nativeTheme.themeSource = 'dark';
   if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) protocol.handle(APP_SCHEME, serveBundle);
+  discardStaleExports();
   createWindow();
 });
 
@@ -390,7 +394,15 @@ app.on('child-process-gone', (_event, details) => {
   if (details.type !== 'GPU') return;
   const line = `${new Date().toISOString()} GPU process gone: ${details.reason}, exit code ${details.exitCode}`;
   console.error(line);
-  fs.appendFile(path.join(app.getPath('userData'), 'gpu.log'), `${line}\n`, () => {});
+  const log = path.join(app.getPath('userData'), 'gpu.log');
+  try {
+    // Start over instead of rotating: the last crashes are the ones worth reading, and userData in this app
+    // already has a history of growing on its own.
+    if (fs.statSync(log).size > GPU_LOG_CAP) fs.rmSync(log);
+  } catch {
+    // no log yet, or it cannot be read — either way the append below is still worth trying
+  }
+  fs.appendFile(log, `${line}\n`, () => {});
   mainWindow?.webContents.send('gpu:gone', `GPU-процес завершився (${details.reason}, код ${details.exitCode})`);
 });
 
