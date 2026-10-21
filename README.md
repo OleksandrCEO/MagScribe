@@ -3,7 +3,7 @@
 Транскрибація відео й аудіо: текст, субтитри `.srt` і таймкоди розділів для YouTube. За замовчуванням —
 локально, на твоїй машині.
 
-> **In English.** MagScribe is a local-first desktop app that transcribes video and audio with Whisper
+> **In English.** MagScribe is a desktop app that transcribes video and audio on your own machine with Whisper
 > large-v3-turbo running on your own GPU (WebGPU, wasm fallback). It produces plain text, SubRip subtitles and
 > YouTube-style chapter timecodes. The interface speaks Ukrainian and English — it opens in the language of
 > the operating system, and the settings window switches it. Linux x86_64; see

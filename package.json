@@ -2,7 +2,7 @@
   "name": "transcriber",
   "productName": "transcriber",
   "version": "1.0.0",
-  "description": "Local-first desktop app that transcribes video and audio: text, .srt subtitles and chapter timecodes",
+  "description": "Desktop app that transcribes video and audio on your own machine: text, .srt subtitles and chapter timecodes",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -19,8 +19,7 @@
     "subtitles",
     "srt",
     "electron",
-    "webgpu",
-    "local-first"
+    "webgpu"
   ],
   "author": {
     "name": "Oleksandr Moiseiuk",

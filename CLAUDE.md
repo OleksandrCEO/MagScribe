@@ -1,6 +1,6 @@
 # MagScribe
 
-Local-first desktop app: converts video/audio files and transcribes them. Transcription runs on the user's machine; the summary and the chapters shell out to the local `claude` CLI, which does reach Anthropic. Cloud engines behind a user's own key are the direction, not a promise that nothing ever leaves — `docs/concept.md` holds that concept, and UI copy must stay honest about which half is local.
+Desktop app: converts video/audio files and transcribes them. Transcription runs on the user's machine; the summary and the chapters shell out to the local `claude` CLI, which does reach Anthropic. Cloud engines behind a user's own key are the direction, not a promise that nothing ever leaves — `docs/concept.md` holds that concept, and UI copy must stay honest about which half is local.
 
 **Stack**: Electron 44 / electron-forge 7 (vite plugin) / Vite 5 / React 19 / TypeScript 5 / Tailwind CSS v4 / shadcn/ui (Base UI variant) / npm
 
