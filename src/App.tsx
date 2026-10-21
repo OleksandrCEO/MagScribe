@@ -13,15 +13,16 @@ import {
   MonitorIcon,
   MoonIcon,
   RotateCcwIcon,
-  SpeechIcon,
   SparklesIcon,
   SunIcon,
+  TypeIcon,
   UploadIcon,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import { AboutDialog, SettingsDialog, readSetting, writeSetting } from '@/settings';
@@ -429,7 +430,7 @@ export default function App() {
       disabled={!file || busy || pending || modelStage === 'failed'}
       onClick={() => (model ? void startTranscription() : setPending(true))}
     >
-      <SpeechIcon />
+      <TypeIcon />
       <span className={wideOnly}>
         {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
       </span>
@@ -758,25 +759,33 @@ export default function App() {
           )}
         </div>
 
-        {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill. */}
-        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end self-center text-xs">
-          {languages.map(({ value, label, title }) => (
-            <button
-              key={label}
-              type="button"
-              title={title}
-              aria-pressed={language === value}
-              disabled={busy}
-              className={cn(
-                'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
-                language === value && 'font-medium text-foreground',
-              )}
-              onClick={() => setLanguage(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill.
+            Three bare words need to say what they are for, so each carries a tooltip. */}
+        <TooltipProvider delay={350}>
+          <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end self-center text-xs">
+            {languages.map(({ value, label, title }) => (
+              <Tooltip key={label}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-pressed={language === value}
+                      disabled={busy}
+                      className={cn(
+                        'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
+                        language === value && 'font-medium text-foreground',
+                      )}
+                      onClick={() => setLanguage(value)}
+                    >
+                      {label}
+                    </button>
+                  }
+                />
+                <TooltipContent>{title}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </TooltipProvider>
       </div>
 
       <SettingsDialog open={dialog === 'settings'} onClose={() => setDialog(null)} />
