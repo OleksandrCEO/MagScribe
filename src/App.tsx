@@ -63,14 +63,14 @@ type View = 'transcript' | 'subtitles' | 'summary' | 'chapters';
 
 type Screen = View | 'pick' | 'audio';
 
-// What the system title bar says, one word per screen. Empty leaves the bare app name.
+// The page name leads the system title bar, the app name follows it, the way a browser tab reads.
 const SCREEN_TITLES: Record<Screen, string> = {
   pick: '',
-  transcript: 'текст',
-  subtitles: 'субтитри',
-  summary: 'конспект',
-  chapters: 'таймкоди',
-  audio: 'аудіо',
+  transcript: 'Текст',
+  subtitles: 'Субтитри',
+  summary: 'Конспект',
+  chapters: 'Таймкоди',
+  audio: 'Аудіо',
 };
 
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
@@ -329,15 +329,15 @@ export default function App() {
   const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
 
   // Electron takes the window title from the document, so the taskbar can say which screen is open.
-  const titleSuffix = exporting
-    ? 'конвертація'
+  const screenTitle = exporting
+    ? 'Конвертація'
     : converting || progress !== null
-      ? 'транскрибація'
+      ? 'Транскрибація'
       : SCREEN_TITLES[screen];
 
   useEffect(() => {
-    document.title = titleSuffix ? `MagScribe — ${titleSuffix}` : 'MagScribe';
-  }, [titleSuffix]);
+    document.title = screenTitle ? `${screenTitle} — MagScribe` : 'MagScribe';
+  }, [screenTitle]);
   // Transcript, .srt and chapters are three editable texts; only the source differs.
   const panelText = screen === 'subtitles' ? subtitles : screen === 'chapters' ? chapters : transcript;
   const setPanelText = screen === 'subtitles' ? setSubtitles : screen === 'chapters' ? setChapters : setTranscript;
