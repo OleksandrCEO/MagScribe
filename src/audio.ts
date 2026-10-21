@@ -3,8 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ExportedAudio } from './preload';
-
-export const SAMPLE_RATE = 16_000;
+import { SAMPLE_RATE } from './pcm';
 
 const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 

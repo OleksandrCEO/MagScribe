@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { cancelFfmpeg, discardExport, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
+import { MAX_BROWSER_DECODE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS } from './summary';
 
@@ -223,6 +224,15 @@ ipcMain.handle('audio:extract', (event, filePath: unknown, from: unknown): Promi
 ipcMain.handle('audio:export', (event, filePath: unknown): Promise<ExportedAudio> =>
   exportAudio(requirePath(filePath, 'audio:export'), (percent) => event.sender.send('audio:progress', percent)),
 );
+
+// Without ffmpeg the window decodes the file itself, with the browser's decoder, and for that it needs the
+// bytes. Only as far as that decoder can reasonably go: it holds the whole thing in memory at once.
+ipcMain.handle('file:bytes', async (_event, filePath: unknown): Promise<Buffer> => {
+  const target = requirePath(filePath, 'file:bytes');
+  const { size } = await fs.promises.stat(target);
+  if (size > MAX_BROWSER_DECODE) throw new Error('too large to decode without ffmpeg');
+  return fs.promises.readFile(target);
+});
 
 // Where the last save went. Without it every dialog opens in ~/Downloads, however many times in a row the
 // person has picked another folder.

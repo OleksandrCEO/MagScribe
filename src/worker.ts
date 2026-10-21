@@ -6,9 +6,9 @@ import {
   type AutomaticSpeechRecognitionPipeline,
   type ProgressInfo,
 } from '@huggingface/transformers';
+import { SAMPLE_RATE } from './pcm';
 
 const MODEL_ID = 'onnx-community/whisper-large-v3-turbo';
-const SAMPLE_RATE = 16_000;
 const CHUNK_LENGTH_S = 30;
 const STRIDE_LENGTH_S = 5;
 const JUMP_S = CHUNK_LENGTH_S - 2 * STRIDE_LENGTH_S; // new audio each chunk adds; the rest overlaps its neighbours

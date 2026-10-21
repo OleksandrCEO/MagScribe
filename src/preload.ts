@@ -21,6 +21,9 @@ const api = {
   hasFfmpeg: (): Promise<boolean> => ipcRenderer.invoke('ffmpeg:present'),
   // Opens ffmpeg's download page. The URL lives in main and takes no argument from here.
   openFfmpegDownload: (): void => ipcRenderer.send('ffmpeg:download'),
+  // The raw file, for the browser decoder that stands in for a missing ffmpeg. Rejects on a file too big to
+  // hold in memory, which is what that decoder would do with it.
+  readBytes: (filePath: string): Promise<Uint8Array> => ipcRenderer.invoke('file:bytes', filePath),
   // Percentage of the extract/export ffmpeg is currently running.
   onAudioProgress: (listener: (percent: number) => void): void => {
     ipcRenderer.on('audio:progress', (_event, percent: unknown) => listener(Number(percent)));

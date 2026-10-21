@@ -36,6 +36,7 @@ import {
   writePrompts,
   writeSetting,
 } from '@/settings';
+import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
 import { timecode, toSrt, toTimedText } from '@/subtitles';
 import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
@@ -123,7 +124,7 @@ export default function App() {
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
   const [confirming, setConfirming] = useState(false); // the stop is one click away from costing the subtitles
   const [closeAsked, setCloseAsked] = useState(false); // main caught a close while a run was in flight
-  const [noFfmpeg, setNoFfmpeg] = useState(false); // the machine has no ffmpeg and something needed it
+  const [noFfmpeg, setNoFfmpeg] = useState<string | null>(null); // why the «потрібен ffmpeg» window is open
   const ffmpegReady = useRef(true); // asked once on startup; assume yes until main says otherwise
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
@@ -288,12 +289,21 @@ export default function App() {
   const extension = file?.name.split('.').pop() ?? '';
 
   /** `from` resumes a stopped run at that second of the file, keeping the text it already produced. */
+  /**
+   * Samples for the worker. ffmpeg does it when the machine has one — it streams, reports a percentage and
+   * reads anything. Without it the browser's own decoder stands in: it holds the whole file in memory and only
+   * knows the containers Chromium can demux, which is enough for the short clips this case is about.
+   */
+  const readSamples = async (path: string, from?: number): Promise<Float32Array> => {
+    if (ffmpegReady.current) return window.api.extractAudio(path, from);
+
+    const samples = await decodeInBrowser(await window.api.readBytes(path));
+    // ffmpeg seeks before decoding; here the whole file is already decoded, so a resumed run just skips ahead.
+    return from ? samples.subarray(Math.floor(from * SAMPLE_RATE)) : samples;
+  };
+
   const startTranscription = async (from?: number): Promise<void> => {
     if (!file || !workerRef.current) return;
-    if (!ffmpegReady.current) {
-      setNoFfmpeg(true);
-      return;
-    }
 
     const resuming = from !== undefined && from > 0;
     clearResults(resuming);
@@ -309,12 +319,17 @@ export default function App() {
     setConverting(true);
     startedAt.current = Date.now();
     try {
-      const samples = await window.api.extractAudio(file.path, from);
+      const samples = await readSamples(file.path, from);
       if (stopped.current) return; // the stop caught up while ffmpeg was finishing: the worker is a new one
       setProgress(0);
       workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
     } catch (error) {
-      if (!stopped.current) failWith(error); // a killed ffmpeg rejects like a broken one
+      // A killed ffmpeg rejects like a broken one. With no ffmpeg at all, a failure here means the browser
+      // could not read this particular file, and the answer to that is the same window as a missing binary.
+      if (!stopped.current) {
+        if (ffmpegReady.current) failWith(error);
+        else setNoFfmpeg('Цей файл не вдалося прочитати — для нього потрібен ffmpeg.');
+      }
       setProgress(null);
     } finally {
       setConverting(false);
@@ -324,7 +339,7 @@ export default function App() {
   const convertToAudio = async (): Promise<void> => {
     if (!file) return;
     if (!ffmpegReady.current) {
-      setNoFfmpeg(true);
+      setNoFfmpeg('Щоб зберегти аудіодоріжку окремим файлом, потрібен ffmpeg.');
       return;
     }
 
@@ -351,7 +366,7 @@ export default function App() {
   const saveTrack = async (): Promise<void> => {
     if (!file) return;
     if (!ffmpegReady.current) {
-      setNoFfmpeg(true);
+      setNoFfmpeg('Щоб зберегти аудіодоріжку окремим файлом, потрібен ffmpeg.');
       return;
     }
 
@@ -418,7 +433,8 @@ export default function App() {
   const job: Job | null = exporting || savingTrack
     ? { label: 'Готую аудіофайл', value: conversion }
     : converting
-      ? { label: 'Читаю звук із файлу', value: conversion }
+      // The browser decoder reports nothing on its way; only ffmpeg has a percentage to show.
+      ? { label: 'Читаю звук із файлу', value: ffmpegReady.current ? conversion : undefined }
       : merging
         ? { label: 'Збираю текст і таймкоди' }
         : progress !== null
@@ -1022,24 +1038,27 @@ export default function App() {
         </p>
       </ConfirmDialog>
       <ConfirmDialog
-        open={noFfmpeg}
+        open={noFfmpeg !== null}
         title="Потрібен ffmpeg"
         cancel="Зрозуміло"
         confirm="Відкрити сайт ffmpeg"
         tone="default"
         onConfirm={() => {
           window.api.openFfmpegDownload();
-          setNoFfmpeg(false);
+          setNoFfmpeg(null);
         }}
         // Re-ask on the way out: ffmpeg may have been installed while this window was open.
         onClose={() => {
-          setNoFfmpeg(false);
+          setNoFfmpeg(null);
           void window.api.hasFfmpeg().then((present) => (ffmpegReady.current = present));
         }}
       >
         <p>
-          MagScribe читає звук із відео й зберігає аудіодоріжку чужими руками — утилітою{' '}
-          <span className="font-medium text-foreground">ffmpeg</span>. У системі її зараз немає.
+          {noFfmpeg} Утиліта <span className="font-medium text-foreground">ffmpeg</span> у системі не знайшлася.
+        </p>
+        <p>
+          Коротке відео чи аудіо MagScribe розшифрує й без неї — прочитає сам, декодером браузера. Але довгі
+          файли, контейнери AVI та WMV і збереження аудіодоріжки без ffmpeg не вийдуть.
         </p>
         <p>
           У Linux вона майже завжди є в пакетах дистрибутива (<code>ffmpeg</code>); для Windows і macOS збірки

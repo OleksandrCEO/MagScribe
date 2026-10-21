@@ -96,7 +96,7 @@ pkgs.stdenv.mkDerivation {
       name = appId;
       desktopName = "MagScribe";
       genericName = "Транскрибація відео та аудіо";
-      comment = "Транскрибація відео й аудіо локально на цій машині";
+      comment = "Транскрибація відео й аудіо: текст, субтитри .srt і таймкоди розділів";
       exec = "magscribe";
       icon = appId;
       terminal = false;
