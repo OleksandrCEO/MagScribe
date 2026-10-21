@@ -154,6 +154,13 @@ export default function App() {
 
   const s = STRINGS[uiLang]; // every line this window shows
 
+  // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
+  const speech: { value: Language; label: string; title: string }[] = [
+    { value: null, label: s.speech.auto, title: s.speech.autoHint },
+    { value: 'uk', label: 'UK', title: s.speech.ukHint },
+    { value: 'en', label: 'EN', title: s.speech.enHint },
+  ];
+
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
   const workerRef = useRef<Worker | null>(null);
@@ -958,11 +965,7 @@ export default function App() {
             Three bare words need to say what they are for, so each carries a tooltip. */}
         <TooltipProvider delay={350}>
           <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end self-center text-xs">
-            {[
-              { value: null, label: s.speech.auto, title: s.speech.autoHint },
-              { value: 'uk', label: 'UK', title: s.speech.ukHint },
-              { value: 'en', label: 'EN', title: s.speech.enHint },
-            ].map(({ value, label, title }) => (
+            {speech.map(({ value, label, title }) => (
               <Tooltip key={label}>
                 <TooltipTrigger
                   render={
@@ -974,7 +977,7 @@ export default function App() {
                         'text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none',
                         language === value && 'font-medium text-foreground',
                       )}
-                      onClick={() => setLanguage(value as Language)}
+                      onClick={() => setLanguage(value)}
                     >
                       {label}
                     </button>
