@@ -27,6 +27,7 @@ export type WorkerResponse =
   | { type: 'fallback'; from: Device; reason: string }
   | { type: 'ready'; adapter: string; encoder: string } // what the model really runs on, for the status line
   | { type: 'progress'; progress: number } // transcription, 0..100
+  | { type: 'merging' } // chunks done; the pipeline is still stitching overlaps and timestamps
   | { type: 'partial'; text: string } // text so far, so the first chunk is not a silent wait
   | { type: 'result'; text: string; segments: Segment[] }
   | { type: 'error'; message: string };
@@ -130,6 +131,9 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
     on_finalize: () => {
       finished += 1;
       post({ type: 'progress', progress: Math.min(100, (finished / totalChunks) * 100) });
+      // The last chunk is not the end: decode_asr still has to resolve the overlaps between every pair of
+      // chunks and turn the timestamp tokens into spans. Nothing reports from in there, so say so here.
+      if (finished >= totalChunks) post({ type: 'merging' });
     },
   });
 

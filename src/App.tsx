@@ -13,6 +13,7 @@ import {
   MonitorIcon,
   MoonIcon,
   RotateCcwIcon,
+  SpeechIcon,
   SparklesIcon,
   SunIcon,
   UploadIcon,
@@ -50,9 +51,9 @@ const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
 ];
 
 const languages: { value: Language; label: string; title: string }[] = [
-  { value: null, label: 'Авто', title: 'Визначити мову автоматично' },
-  { value: 'uk', label: 'UK', title: 'Українська' },
-  { value: 'en', label: 'EN', title: 'Англійська' },
+  { value: null, label: 'Авто', title: 'Мова розпізнавання — визначити автоматично' },
+  { value: 'uk', label: 'UK', title: 'Мова розпізнавання — українська' },
+  { value: 'en', label: 'EN', title: 'Мова розпізнавання — англійська' },
 ];
 
 const THEME_VALUES = themes.map(({ value }) => value);
@@ -63,6 +64,10 @@ type View = 'transcript' | 'subtitles' | 'summary' | 'chapters';
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
 const panelClass =
   'min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-background px-7 py-6 text-[15px] leading-[1.7] [scrollbar-width:thin]';
+
+// Under ~790 px the pill cannot hold its labels: the buttons fall back to their icons, and the title carries
+// the name for both the tooltip and the accessibility tree.
+const wideOnly = 'max-[790px]:hidden';
 
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Job = { label: string; value?: number };
@@ -80,6 +85,7 @@ export default function App() {
   const [converting, setConverting] = useState(false); // decoding the file for the model
   const [conversion, setConversion] = useState(0); // percentage of the ffmpeg run behind converting/exporting
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
+  const [merging, setMerging] = useState(false); // all chunks decoded, the pipeline is stitching them together
   const [transcript, setTranscript] = useState('');
   const [segments, setSegments] = useState<Segment[]>([]); // timestamped speech, behind the subtitles and chapters
   const [subtitles, setSubtitles] = useState(''); // the .srt itself, so it can be fixed up before saving
@@ -112,8 +118,10 @@ export default function App() {
       }
       if (message.type === 'fallback') setFallback(`${message.from} недоступний: ${message.reason}`);
       if (message.type === 'progress') setProgress(message.progress);
+      if (message.type === 'merging') setMerging(true);
       if (message.type === 'partial') setTranscript(message.text);
       if (message.type === 'result') {
+        setMerging(false);
         setTranscript(message.text);
         setSegments(message.segments);
         setSubtitles(toSrt(message.segments));
@@ -126,6 +134,7 @@ export default function App() {
         if (!ready.current) setModelError(message.message);
         else toast.error(message.message);
         setProgress(null);
+        setMerging(false);
       }
     });
 
@@ -199,6 +208,7 @@ export default function App() {
 
     clearResults();
     setPending(false);
+    setMerging(false);
     setConversion(0);
     setConverting(true);
     startedAt.current = Date.now();
@@ -277,15 +287,17 @@ export default function App() {
     ? { label: 'Конвертація в аудіо', value: conversion }
     : converting
       ? { label: 'Конвертація аудіо', value: conversion }
-      : progress !== null
-        ? { label: 'Транскрибація', value: progress }
-        : aiTask
-          ? { label: aiTask === 'summary' ? 'Готую конспект' : 'Готую таймкоди' }
-          : modelStage === 'downloading'
-            ? { label: 'Завантаження моделі', value: download }
-            : modelStage === 'preparing'
-              ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
-              : null;
+      : merging
+        ? { label: 'Збираю текст і таймкоди' }
+        : progress !== null
+          ? { label: 'Транскрибація', value: progress }
+          : aiTask
+            ? { label: aiTask === 'summary' ? 'Готую конспект' : 'Готую таймкоди' }
+            : modelStage === 'downloading'
+              ? { label: 'Завантаження моделі', value: download }
+              : modelStage === 'preparing'
+                ? { label: 'Готую модель до роботи — перший запуск триває кілька хвилин' }
+                : null;
 
   const status = busy
     ? 'Машина не засне до завершення'
@@ -342,32 +354,46 @@ export default function App() {
 
   // The lead button follows what is on screen: the text leads to a summary, the .srt leads to chapters.
   const summaryButton: ReactNode = summary ? (
-    <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('summary')}>
-      <SparklesIcon /> Конспект
+    <Button
+      size="lg"
+      className="rounded-full px-4.5"
+      title="Конспект"
+      disabled={!done}
+      onClick={() => setView('summary')}
+    >
+      <SparklesIcon /> <span className={wideOnly}>Конспект</span>
     </Button>
   ) : (
     <Button
       size="lg"
       className="rounded-full px-4.5"
+      title="Вловити суть"
       disabled={!done || aiTask !== null}
       onClick={() => runAi('summary')}
     >
-      <SparklesIcon /> {aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}
+      <SparklesIcon /> <span className={wideOnly}>{aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}</span>
     </Button>
   );
 
   const chaptersButton: ReactNode = chapters ? (
-    <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('chapters')}>
-      <ListOrderedIcon /> Таймкоди
+    <Button
+      size="lg"
+      className="rounded-full px-4.5"
+      title="Таймкоди"
+      disabled={!done}
+      onClick={() => setView('chapters')}
+    >
+      <ListOrderedIcon /> <span className={wideOnly}>Таймкоди</span>
     </Button>
   ) : (
     <Button
       size="lg"
       className="rounded-full px-4.5"
+      title="Таймкоди"
       disabled={!done || segments.length === 0 || aiTask !== null}
       onClick={() => runAi('chapters')}
     >
-      <ListOrderedIcon /> {aiTask === 'chapters' ? 'Готую таймкоди…' : 'Таймкоди'}
+      <ListOrderedIcon /> <span className={wideOnly}>{aiTask === 'chapters' ? 'Готую таймкоди…' : 'Таймкоди'}</span>
     </Button>
   );
 
@@ -376,10 +402,14 @@ export default function App() {
       variant={variant}
       size="lg"
       className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
+      title="Транскрибувати"
       disabled={!file || busy || pending || modelStage === 'failed'}
       onClick={() => (model ? void startTranscription() : setPending(true))}
     >
-      {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
+      <SpeechIcon />
+      <span className={wideOnly}>
+        {busy && stage === 'text' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
+      </span>
     </Button>
   );
 
@@ -554,7 +584,7 @@ export default function App() {
         <div
           className={cn(
             'pointer-events-auto flex flex-col gap-0.5 pb-1.5 text-xs',
-            modelError ? 'text-destructive' : 'text-muted-foreground',
+            modelError ? 'text-destructive' : cn('text-muted-foreground', wideOnly),
           )}
           title={fallback ?? undefined}
         >
@@ -575,10 +605,11 @@ export default function App() {
                 variant="ghost"
                 size="lg"
                 className="rounded-full px-3.5"
+                title="Конвертувати у звук"
                 disabled={!file}
                 onClick={convertToAudio}
               >
-                <FileAudioIcon /> Конвертувати
+                <FileAudioIcon /> <span className={wideOnly}>Конвертувати</span>
               </Button>
             </>
           )}
@@ -589,10 +620,11 @@ export default function App() {
                 variant="ghost"
                 size="lg"
                 className="rounded-full px-3.5"
+                title="Копіювати"
                 disabled={!done}
                 onClick={() => copy(onSubtitles ? subtitles : transcript)}
               >
-                <ClipboardCopyIcon /> Копіювати
+                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
               </Button>
               <Button
                 variant="ghost"
@@ -607,19 +639,21 @@ export default function App() {
                     ),
                   )
                 }
+                title={onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}
               >
-                <DownloadIcon /> {onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}
+                <DownloadIcon /> <span className={wideOnly}>{onSubtitles ? 'Зберегти .srt' : 'Зберегти .txt'}</span>
               </Button>
               {segments.length > 0 && (
                 <Button
                   variant="ghost"
                   size="lg"
                   className="rounded-full px-3.5"
+                  title={onSubtitles ? 'До тексту' : 'До субтитрів'}
                   disabled={!done}
                   onClick={() => setView(onSubtitles ? 'transcript' : 'subtitles')}
                 >
                   {onSubtitles ? <FileTextIcon /> : <CaptionsIcon />}
-                  {onSubtitles ? 'Текст' : 'Субтитри'}
+                  <span className={wideOnly}>{onSubtitles ? 'Текст' : 'Субтитри'}</span>
                 </Button>
               )}
               {onSubtitles ? chaptersButton : summaryButton}
@@ -627,35 +661,61 @@ export default function App() {
           )}
           {screen === 'chapters' && (
             <>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('subtitles')}>
-                <ArrowLeftIcon /> До субтитрів
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                title="До субтитрів"
+                onClick={() => setView('subtitles')}
+              >
+                <ArrowLeftIcon /> <span className={wideOnly}>До субтитрів</span>
               </Button>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(chapters)}>
-                <ClipboardCopyIcon /> Копіювати
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                title="Копіювати"
+                onClick={() => copy(chapters)}
+              >
+                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
               </Button>
               <Button
                 size="lg"
                 className="rounded-full px-4.5"
+                title="Зберегти .txt"
                 onClick={() => save(window.api.saveText(chapters, `${baseName} — таймкоди.txt`))}
               >
-                <DownloadIcon /> Зберегти .txt
+                <DownloadIcon /> <span className={wideOnly}>Зберегти .txt</span>
               </Button>
             </>
           )}
           {screen === 'summary' && (
             <>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('transcript')}>
-                <ArrowLeftIcon /> До транскрипту
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                title="До транскрипту"
+                onClick={() => setView('transcript')}
+              >
+                <ArrowLeftIcon /> <span className={wideOnly}>До транскрипту</span>
               </Button>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(summary)}>
-                <ClipboardCopyIcon /> Копіювати
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                title="Копіювати"
+                onClick={() => copy(summary)}
+              >
+                <ClipboardCopyIcon /> <span className={wideOnly}>Копіювати</span>
               </Button>
               <Button
                 size="lg"
                 className="rounded-full px-4.5"
+                title="Зберегти .txt"
                 onClick={() => save(window.api.saveText(summary, `${baseName} — конспект.txt`))}
               >
-                <DownloadIcon /> Зберегти .txt
+                <DownloadIcon /> <span className={wideOnly}>Зберегти .txt</span>
               </Button>
             </>
           )}
@@ -664,10 +724,11 @@ export default function App() {
               <Button
                 size="lg"
                 className="rounded-full px-4.5"
+                title="Зберегти .ogg"
                 disabled={!audio}
                 onClick={() => audio && save(window.api.saveAudio(audio.path, `${baseName}.ogg`))}
               >
-                <DownloadIcon /> Зберегти .ogg
+                <DownloadIcon /> <span className={wideOnly}>Зберегти .ogg</span>
               </Button>
               {transcribeButton('ghost')}
             </>
@@ -675,7 +736,7 @@ export default function App() {
         </div>
 
         {/* Plain text, not a segmented control: it is set once per file and should not compete with the pill. */}
-        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end pb-1.5 text-xs">
+        <div className="pointer-events-auto flex items-center gap-2.5 justify-self-end self-center text-xs">
           {languages.map(({ value, label, title }) => (
             <button
               key={label}
