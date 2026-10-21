@@ -118,7 +118,9 @@ Desktop.ini
 .direnv/
 
 # Local test media
-assets/test.mp4
+# Scratch files for trying things out by hand: test media, transcripts to compare models.
+# Nothing in here is part of the project.
+playground/
 
 # Personal working notes, not part of this project
 docs/claude.md
