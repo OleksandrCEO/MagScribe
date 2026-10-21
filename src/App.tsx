@@ -119,6 +119,7 @@ export default function App() {
   const [view, setView] = useState<View>('transcript'); // each result has its own screen over the transcript
   const [aiTask, setAiTask] = useState<'summary' | 'chapters' | null>(null); // what the claude CLI is chewing on
   const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
+  const [savingTrack, setSavingTrack] = useState(false); // the same encode, but asked for from a result screen
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
   const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
   const [resumeAt, setResumeAt] = useState<number | null>(null); // where a stopped run can pick up, in seconds
@@ -205,7 +206,7 @@ export default function App() {
 
   useEffect(() => writePrompts(prompts), [prompts]);
 
-  const busy = converting || progress !== null || exporting;
+  const busy = converting || progress !== null || exporting || savingTrack;
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -269,6 +270,7 @@ export default function App() {
     setResumeAt(reached > 0 ? reached : null);
     setConverting(false);
     setExporting(false);
+    setSavingTrack(false);
     setProgress(null);
     setMerging(false);
     toast.info(reached > 0 ? `Зупинено на ${timecode(reached)} — можна продовжити` : 'Зупинено');
@@ -322,6 +324,27 @@ export default function App() {
     }
   };
 
+  /**
+   * Hands over the audio track from a result screen. Nothing kept it: the transcription decodes the file into
+   * samples, gives them to the worker and lets them go, so the track is encoded now — and deliberately without
+   * touching `audio`, which would send the window to the export screen and take the results off it.
+   */
+  const saveTrack = async (): Promise<void> => {
+    if (!file) return;
+
+    stopped.current = false;
+    setConversion(0);
+    setSavingTrack(true);
+    try {
+      const track = audio ?? (await window.api.exportAudio(file.path));
+      await save(window.api.saveAudio(track.path, `${baseName}.ogg`));
+    } catch (error) {
+      if (!stopped.current) failWith(error);
+    } finally {
+      setSavingTrack(false);
+    }
+  };
+
   const copy = async (text: string): Promise<void> => {
     if (await window.api.copyText(text)) toast.success('Скопійовано');
     else toast.error('Буфер обміну не прийняв текст');
@@ -368,10 +391,10 @@ export default function App() {
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
   const modelStage = modelError ? 'failed' : model ? 'ready' : download >= 100 ? 'preparing' : 'downloading';
 
-  const job: Job | null = exporting
-    ? { label: 'Конвертація в аудіо', value: conversion }
+  const job: Job | null = exporting || savingTrack
+    ? { label: 'Готую аудіофайл', value: conversion }
     : converting
-      ? { label: 'Конвертація аудіо', value: conversion }
+      ? { label: 'Читаю звук із файлу', value: conversion }
       : merging
         ? { label: 'Збираю текст і таймкоди' }
         : progress !== null
@@ -534,9 +557,35 @@ export default function App() {
         // The text scrolls inside its own panel: the top bar, the pill and the progress block stay put.
         <div className={cn('absolute inset-0 flex flex-col px-6 pt-22', job ? 'pb-33' : 'pb-24')}>
           <div className="mx-auto flex min-h-0 w-170 max-w-full flex-1 flex-col">
-            <h1 className="mb-1.5 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
-              {baseName}
-            </h1>
+            <div className="mb-1.5 flex items-center justify-center gap-2">
+              <h1 className="min-w-0 text-center text-[26px] leading-tight font-semibold tracking-[-0.02em] break-words">
+                {baseName}
+              </h1>
+              {/* The export screen has its own save button; everywhere else the track hides behind this one. */}
+              {stage !== 'audio' && (
+                <TooltipProvider delay={350}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void saveTrack()}
+                          className={cn(
+                            'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground',
+                            'transition-colors hover:bg-muted hover:text-foreground',
+                            'disabled:pointer-events-none disabled:opacity-40',
+                          )}
+                        >
+                          <DownloadIcon className="size-4" />
+                        </button>
+                      }
+                    />
+                    <TooltipContent>Зберегти аудіодоріжку .ogg</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
             <p className="mb-6 text-center text-[13px] text-muted-foreground">
               {screen === 'summary'
                 ? `Конспект · ${countWords(summary)} слів`
@@ -667,8 +716,9 @@ export default function App() {
                   size="icon-xs"
                   title="Зупинити"
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                  // Nothing decoded yet means nothing to lose, so only a run with text asks first.
-                  onClick={() => (covered.current > 0 ? setConfirming(true) : stop())}
+                  // Only a run that is decoding has something to lose; reading the file or encoding a track
+                  // stops without a word.
+                  onClick={() => (progress === null ? stop() : setConfirming(true))}
                 >
                   <XIcon className="size-3.5" />
                 </Button>
