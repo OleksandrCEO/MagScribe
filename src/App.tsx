@@ -996,7 +996,8 @@ export default function App() {
         engine={model && `${model.adapter} · ${model.encoder}`}
         onClose={() => setDialog(null)}
       />
-      <Toaster />
+      {/* Top right: at the bottom the toasts sat over the pill, i.e. over the buttons they are reporting on. */}
+      <Toaster position="top-right" />
     </div>
   );
 }
