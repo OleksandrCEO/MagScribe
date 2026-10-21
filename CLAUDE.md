@@ -99,6 +99,8 @@ Desktop app: converts video/audio files and transcribes them. Transcription runs
 - Commit format: `scope: description` (e.g. `window: restore size and position on launch`).
 - **Version: one commit, one patch.** `package.json` holds `0.x.y`; bump `y` by one in the same commit, and
   roll the tenth into the next minor (`0.7.9` → `0.8.0`), so a minor reads as «ten improvements». Nothing
-  else carries a version: `nix/magscribe.nix` and the About window both read this field. Tag the minors
-  (`git tag v0.8.0`), not every commit. `1.0.0` comes when the app is actually released, not before.
+  else carries a version: `nix/magscribe.nix` and the About window both read this field. `1.0.0` comes when
+  the app is actually released, not before.
+- **Tags only when the developer asks for one.** Not per minor, not per release-looking commit — a tag is his
+  call, the same way a push is.
 - Push only when asked.

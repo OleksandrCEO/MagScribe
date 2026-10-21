@@ -914,7 +914,8 @@ ESLint 8.57.1 вийшов з підтримки в жовтні 2024. Голо�
 > **Зроблено 21.10.2026.** `description`, `keywords`, адреса автора, `repository`/`homepage`/`bugs` — на
 > `github.com/OleksandrCEO/MagScribe`. Версія стала `0.7.0` з тегом `v0.7.0`, і разом з нею — правило в
 > `CLAUDE.md`: один коміт підіймає patch, десятий перекочується в наступний minor, тобто minor читається як
-> «десять покращень». Тегуються minor-и, не кожен коміт. `1.0.0` буде, коли застосунок справді вийде.
+> «десять покращень». Теги ставляться тільки на пряме прохання власника — не по minor-ах. `1.0.0` буде, коли
+> застосунок справді вийде.
 
 `"description": "My Electron application description"`, `"keywords": []`, немає `repository`/`homepage`/`bugs`.
 `"productName": "transcriber"` при назві MagScribe перейменовувати **не можна** (зав'язано на Wayland app_id,
