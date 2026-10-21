@@ -2,13 +2,16 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'rea
 import {
   ArrowLeftIcon,
   AudioLinesIcon,
+  CaptionsIcon,
   ClipboardCopyIcon,
   DownloadIcon,
   FileAudioIcon,
   FileVideoIcon,
+  ListOrderedIcon,
   MonitorIcon,
   MoonIcon,
   RotateCcwIcon,
+  SettingsIcon,
   SparklesIcon,
   SunIcon,
   UploadIcon,
@@ -19,7 +22,9 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Textarea } from '@/components/ui/textarea';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
-import type { Language, WorkerRequest, WorkerResponse } from '@/worker';
+import { MODES, MODE_KEY, SettingsDialog, readSetting, writeSetting, type Mode } from '@/settings';
+import { toSrt, toTimedText } from '@/subtitles';
+import type { Language, Segment, WorkerRequest, WorkerResponse } from '@/worker';
 import { cn } from 'cn';
 
 const formatSize = (bytes: number): string => {
@@ -34,6 +39,8 @@ const formatDuration = (seconds: number): string =>
 
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
+const countLines = (text: string): number => text.split('\n').filter((line) => line.trim()).length;
+
 const THEME_KEY = 'theme';
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Світла', Icon: SunIcon },
@@ -47,14 +54,11 @@ const languages: { value: Language; label: string; title: string }[] = [
   { value: 'en', label: 'EN', title: 'Англійська' },
 ];
 
-const readTheme = (): Theme => {
-  try {
-    const saved = localStorage.getItem(THEME_KEY);
-    return themes.some((theme) => theme.value === saved) ? (saved as Theme) : 'system';
-  } catch {
-    return 'system';
-  }
-};
+const THEME_VALUES = themes.map(({ value }) => value);
+const MODE_VALUES = MODES.map(({ value }) => value);
+
+// Which of the result screens is on. The two modes double as views: a run lands on the one it was started as.
+type View = Mode | 'summary' | 'chapters';
 
 // The text panel between the title and the pill, shared by the transcript editor and the rendered summary.
 const panelClass =
@@ -66,7 +70,9 @@ type Job = { label: string; value?: number };
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'system'));
+  const [mode, setMode] = useState<Mode>(() => readSetting(MODE_KEY, MODE_VALUES, 'transcript'));
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [language, setLanguage] = useState<Language>('uk');
   const [download, setDownload] = useState(0);
   const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
@@ -76,13 +82,15 @@ export default function App() {
   const [conversion, setConversion] = useState(0); // percentage of the ffmpeg run behind converting/exporting
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
+  const [segments, setSegments] = useState<Segment[]>([]); // timestamped speech, behind the subtitles and chapters
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
-  const [showSummary, setShowSummary] = useState(false); // the summary has its own screen over the transcript
-  const [summarizing, setSummarizing] = useState(false);
+  const [chapters, setChapters] = useState('');
+  const [view, setView] = useState<View>(mode); // each result has its own screen over the transcript
+  const [aiTask, setAiTask] = useState<'summary' | 'chapters' | null>(null); // what the claude CLI is chewing on
   const [exporting, setExporting] = useState(false); // re-encoding the file to OGG/Opus
   const [audio, setAudio] = useState<ExportedAudio | null>(null);
-  const [pending, setPending] = useState(false); // asked to transcribe before the model finished loading
+  const [pending, setPending] = useState<Mode | null>(null); // asked to transcribe before the model finished loading
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
@@ -107,6 +115,7 @@ export default function App() {
       if (message.type === 'partial') setTranscript(message.text);
       if (message.type === 'result') {
         setTranscript(message.text);
+        setSegments(message.segments);
         setProgress(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
         window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(message.text)} слів`);
@@ -130,13 +139,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      // a theme that does not survive a restart is not worth an error
-    }
+    writeSetting(THEME_KEY, theme);
     window.api.setTheme(theme);
   }, [theme]);
+
+  useEffect(() => writeSetting(MODE_KEY, mode), [mode]);
 
   const busy = converting || progress !== null || exporting;
 
@@ -147,8 +154,10 @@ export default function App() {
 
   const clearResults = (): void => {
     setTranscript('');
+    setSegments([]);
     setSummary('');
-    setShowSummary(false);
+    setChapters('');
+    setView(mode);
     setElapsed(null);
     setAudio(null);
   };
@@ -185,11 +194,12 @@ export default function App() {
   const baseName = file ? file.name.replace(/\.[^.]+$/, '') : '';
   const extension = file?.name.split('.').pop() ?? '';
 
-  const startTranscription = async (): Promise<void> => {
+  const startTranscription = async (target: Mode): Promise<void> => {
     if (!file || !workerRef.current) return;
 
     clearResults();
-    setPending(false);
+    setView(target);
+    setPending(null);
     setConversion(0);
     setConverting(true);
     startedAt.current = Date.now();
@@ -233,15 +243,19 @@ export default function App() {
     }
   };
 
-  const makeSummary = async (): Promise<void> => {
-    setSummarizing(true);
+  // Both stages run the local claude CLI: a summary of the plain text, chapters of the timestamped lines.
+  const runAi = async (task: 'summary' | 'chapters'): Promise<void> => {
+    setAiTask(task);
     try {
-      setSummary(await window.api.summarize(transcript));
-      setShowSummary(true);
+      const text =
+        task === 'summary' ? await window.api.summarize(transcript) : await window.api.chapters(toTimedText(segments));
+      if (task === 'summary') setSummary(text);
+      else setChapters(text);
+      setView(task);
     } catch (error) {
       failWith(error);
     } finally {
-      setSummarizing(false);
+      setAiTask(null);
     }
   };
 
@@ -253,8 +267,9 @@ export default function App() {
   // Loading the model takes a few seconds on every start — let the click wait for it instead of the person.
   useEffect(() => {
     if (!pending || model === null || busy) return;
-    setPending(false);
-    void startTranscription();
+    const target = pending;
+    setPending(null);
+    void startTranscription(target);
   }, [pending, model, busy]);
 
   // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
@@ -266,8 +281,8 @@ export default function App() {
       ? { label: 'Конвертація аудіо', value: conversion }
       : progress !== null
         ? { label: 'Транскрибація', value: progress }
-        : summarizing
-          ? { label: 'Готую конспект' }
+        : aiTask
+          ? { label: aiTask === 'summary' ? 'Готую конспект' : 'Готую таймкоди' }
           : modelStage === 'downloading'
             ? { label: 'Завантаження моделі', value: download }
             : modelStage === 'preparing'
@@ -284,11 +299,14 @@ export default function App() {
         ? 'Готую модель'
         : 'Завантажую модель';
 
-  // What the window is about right now: picking a file, reading a transcript or its summary, or holding an
-  // exported track.
-  const mode = audio || exporting ? 'audio' : transcript || busy ? 'transcript' : 'pick';
-  const screen = mode === 'transcript' && showSummary && summary ? 'summary' : mode;
+  // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
+  const stage = audio || exporting ? 'audio' : transcript || busy ? 'text' : 'pick';
+  // A run the model gave no usable timestamps for has nothing to show as subtitles — keep the text instead.
+  const resultView: View = view === 'subtitles' && segments.length === 0 ? 'transcript' : view;
+  // While it runs you watch the text stream in; the chosen view only takes over once there is a result.
+  const screen = stage !== 'text' ? stage : busy ? 'transcript' : resultView;
   const done = transcript !== '' && !busy;
+  const srt = segments.length > 0 ? toSrt(segments) : '';
 
   const dropZone: ReactNode = (
     <div className="flex w-120 max-w-full flex-col gap-3.5">
@@ -311,7 +329,7 @@ export default function App() {
         </Button>
       </div>
 
-      {file && mode === 'pick' && (
+      {file && stage === 'pick' && (
         <div className="flex items-center gap-3 rounded-[10px] border bg-background px-3 py-2.5" title={file.path}>
           <FileVideoIcon className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -323,15 +341,27 @@ export default function App() {
     </div>
   );
 
-  const transcribeButton = (variant: 'default' | 'ghost'): ReactNode => (
+  // Both starts run the same transcription — they differ only in the screen it lands on. The mode from the
+  // settings leads the pill; the other stays one click away for a single file.
+  const starts: Mode[] = mode === 'subtitles' ? ['subtitles', 'transcript'] : ['transcript', 'subtitles'];
+
+  const startButton = (target: Mode, variant: 'default' | 'ghost'): ReactNode => (
     <Button
+      key={target}
       variant={variant}
       size="lg"
       className={cn('rounded-full', variant === 'default' ? 'px-4.5' : 'px-3.5')}
-      disabled={!file || busy || pending || modelStage === 'failed'}
-      onClick={() => (model ? void startTranscription() : setPending(true))}
+      disabled={!file || busy || pending !== null || modelStage === 'failed'}
+      onClick={() => (model ? void startTranscription(target) : setPending(target))}
     >
-      {busy && mode === 'transcript' ? 'Транскрибую…' : pending ? 'Чекаю на модель…' : 'Транскрибувати'}
+      {target === 'subtitles' && <CaptionsIcon />}
+      {busy && stage === 'text'
+        ? 'Транскрибую…'
+        : pending === target
+          ? 'Чекаю на модель…'
+          : target === 'subtitles'
+            ? 'Субтитри'
+            : 'Транскрибувати'}
     </Button>
   );
 
@@ -350,7 +380,7 @@ export default function App() {
       }}
       onDrop={handleDrop}
     >
-      {mode === 'pick' ? (
+      {stage === 'pick' ? (
         <div className="absolute inset-0 flex items-center justify-center pb-15">{dropZone}</div>
       ) : (
         // The text scrolls inside its own panel: the top bar, the pill and the progress block stay put.
@@ -362,9 +392,13 @@ export default function App() {
             <p className="mb-6 text-center text-[13px] text-muted-foreground">
               {screen === 'summary'
                 ? `Конспект · ${countWords(summary)} слів`
-                : audio
-                  ? `OGG · Opus · ${formatSize(audio.size)}`
-                  : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
+                : screen === 'subtitles'
+                  ? `Субтитри · SRT · ${segments.length} реплік`
+                  : screen === 'chapters'
+                    ? `Таймкоди · ${countLines(chapters)} розділів`
+                    : audio
+                      ? `OGG · Opus · ${formatSize(audio.size)}`
+                      : file && `${formatSize(file.size)} · ${extension.toUpperCase()}`}
               {screen === 'transcript' &&
                 elapsed !== null &&
                 ` · розшифровано за ${formatDuration(elapsed)} · ${countWords(transcript)} слів`}
@@ -382,22 +416,23 @@ export default function App() {
                 <Markdown>{summary}</Markdown>
               </div>
             ) : (
-              // Editable so misheard names can be fixed in place; the worker still streams into it while it runs.
+              // Editable so misheard names and clumsy chapter titles can be fixed in place; the worker still
+              // streams into the transcript while it runs. The .srt is generated from the segments, so it is not.
               <Textarea
                 className={cn(
                   panelClass,
                   'field-sizing-fixed resize-none border-border focus-visible:ring-0 md:text-[15px] dark:bg-background',
                 )}
-                value={transcript}
-                readOnly={busy}
-                onChange={(event) => setTranscript(event.target.value)}
+                value={screen === 'subtitles' ? srt : screen === 'chapters' ? chapters : transcript}
+                readOnly={busy || screen === 'subtitles'}
+                onChange={(event) => (screen === 'chapters' ? setChapters : setTranscript)(event.target.value)}
               />
             )}
           </div>
         </div>
       )}
 
-      {mode !== 'pick' && dragging && !busy && (
+      {stage !== 'pick' && dragging && !busy && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 pb-15 backdrop-blur-sm">
           {dropZone}
         </div>
@@ -409,11 +444,20 @@ export default function App() {
       </div>
 
       <div className="absolute top-4 right-5 flex items-center gap-2">
-        {mode !== 'pick' && !busy && (
+        {stage !== 'pick' && !busy && (
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={startOver}>
             <RotateCcwIcon /> Почати заново
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="Налаштування"
+          className="text-muted-foreground"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <SettingsIcon />
+        </Button>
         <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
           {themes.map(({ value, label, Icon }) => (
             <Button
@@ -479,9 +523,9 @@ export default function App() {
             'ring-1 ring-border shadow-[0_12px_32px_-12px_rgb(0_0_0/0.35)]',
           )}
         >
-          {mode === 'pick' && (
+          {stage === 'pick' && (
             <>
-              {transcribeButton('default')}
+              {starts.map((target, index) => startButton(target, index === 0 ? 'default' : 'ghost'))}
               <Button
                 variant="ghost"
                 size="lg"
@@ -513,20 +557,85 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .txt
               </Button>
+              {segments.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  className="rounded-full px-3.5"
+                  disabled={!done}
+                  onClick={() => setView('subtitles')}
+                >
+                  <CaptionsIcon /> Субтитри
+                </Button>
+              )}
               {summary ? (
-                <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setShowSummary(true)}>
+                <Button size="lg" className="rounded-full px-4.5" disabled={!done} onClick={() => setView('summary')}>
                   <SparklesIcon /> Конспект
                 </Button>
               ) : (
-                <Button size="lg" className="rounded-full px-4.5" disabled={!done || summarizing} onClick={makeSummary}>
-                  <SparklesIcon /> {summarizing ? 'Готую конспект…' : 'Вловити суть'}
+                <Button
+                  size="lg"
+                  className="rounded-full px-4.5"
+                  disabled={!done || aiTask !== null}
+                  onClick={() => runAi('summary')}
+                >
+                  <SparklesIcon /> {aiTask === 'summary' ? 'Готую конспект…' : 'Вловити суть'}
                 </Button>
               )}
             </>
           )}
+          {screen === 'subtitles' && (
+            <>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('transcript')}>
+                <ArrowLeftIcon /> До тексту
+              </Button>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(srt)}>
+                <ClipboardCopyIcon /> Копіювати
+              </Button>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="rounded-full px-3.5"
+                onClick={() => save(window.api.saveText(srt, `${baseName}.srt`))}
+              >
+                <DownloadIcon /> Зберегти .srt
+              </Button>
+              {chapters ? (
+                <Button size="lg" className="rounded-full px-4.5" onClick={() => setView('chapters')}>
+                  <ListOrderedIcon /> Таймкоди
+                </Button>
+              ) : (
+                <Button
+                  size="lg"
+                  className="rounded-full px-4.5"
+                  disabled={!done || aiTask !== null}
+                  onClick={() => runAi('chapters')}
+                >
+                  <ListOrderedIcon /> {aiTask === 'chapters' ? 'Готую таймкоди…' : 'Зробити таймкоди'}
+                </Button>
+              )}
+            </>
+          )}
+          {screen === 'chapters' && (
+            <>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('subtitles')}>
+                <ArrowLeftIcon /> До субтитрів
+              </Button>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(chapters)}>
+                <ClipboardCopyIcon /> Копіювати
+              </Button>
+              <Button
+                size="lg"
+                className="rounded-full px-4.5"
+                onClick={() => save(window.api.saveText(chapters, `${baseName} — таймкоди.txt`))}
+              >
+                <DownloadIcon /> Зберегти .txt
+              </Button>
+            </>
+          )}
           {screen === 'summary' && (
             <>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setShowSummary(false)}>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('transcript')}>
                 <ArrowLeftIcon /> До транскрипту
               </Button>
               <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(summary)}>
@@ -541,7 +650,7 @@ export default function App() {
               </Button>
             </>
           )}
-          {mode === 'audio' && (
+          {stage === 'audio' && (
             <>
               <Button
                 size="lg"
@@ -551,7 +660,7 @@ export default function App() {
               >
                 <DownloadIcon /> Зберегти .ogg
               </Button>
-              {transcribeButton('ghost')}
+              {startButton(mode, 'ghost')}
             </>
           )}
         </div>
@@ -577,6 +686,7 @@ export default function App() {
         </div>
       </div>
 
+      <SettingsDialog open={settingsOpen} mode={mode} onMode={setMode} onClose={() => setSettingsOpen(false)} />
       <Toaster />
     </div>
   );

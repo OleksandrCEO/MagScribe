@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { discardExport, exportAudio, extractAudio, isExport } from './audio';
-import { summarize } from './summary';
+import { AI_TASKS, type AiTask } from './summary';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -57,7 +57,7 @@ if (started) {
 
 const MIN_WIDTH = 640;
 const MIN_HEIGHT = 520;
-const DEFAULT_BOUNDS = { width: 900, height: 680 };
+const DEFAULT_BOUNDS = { width: 1040, height: 680 };
 
 type WindowBounds = { width: number; height: number; x?: number; y?: number };
 
@@ -223,7 +223,14 @@ const askWhereToSave = async (
 ipcMain.handle('file:save', async (_event, text: unknown, suggestedName: unknown): Promise<boolean> => {
   if (typeof text !== 'string') throw new Error('file:save needs text');
 
-  const target = await askWhereToSave(suggestedName, 'transcript.txt', { name: 'Текст', extensions: ['txt'] });
+  // The renderer saves .txt and .srt through this one channel, so the dialog filter follows the name it suggested.
+  const suffix = typeof suggestedName === 'string' ? path.extname(suggestedName).slice(1).toLowerCase() : '';
+  const extension = /^[a-z0-9]{1,8}$/.test(suffix) ? suffix : 'txt';
+
+  const target = await askWhereToSave(suggestedName, `transcript.${extension}`, {
+    name: extension.toUpperCase(),
+    extensions: [extension],
+  });
   if (target === null) return false;
 
   await fs.promises.writeFile(target, text, 'utf-8');
@@ -257,11 +264,12 @@ ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
   notification.show();
 });
 
-ipcMain.handle('summary:run', (_event, transcript: unknown): Promise<string> => {
-  if (typeof transcript !== 'string' || transcript.trim().length === 0) {
-    throw new Error('summary:run needs a transcript');
-  }
-  return summarize(transcript);
+ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown): Promise<string> => {
+  const run = AI_TASKS[task as AiTask] as ((input: string) => Promise<string>) | undefined;
+  if (!run) throw new Error(`ai:run: unknown task ${String(task)}`);
+  if (typeof transcript !== 'string' || transcript.trim().length === 0) throw new Error('ai:run needs a transcript');
+
+  return run(transcript);
 });
 
 // This method will be called when Electron has finished

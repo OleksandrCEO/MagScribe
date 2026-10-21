@@ -17,6 +17,9 @@ export type Device = 'webgpu' | 'wasm';
 // null lets Whisper detect the language itself, per 30-second chunk.
 export type Language = 'uk' | 'en' | null;
 
+/** One timestamped piece of speech — a subtitle line, and the unit the chapter prompt reads. */
+export type Segment = { start: number; end: number; text: string };
+
 export type WorkerRequest = { type: 'load' } | { type: 'transcribe'; audio: Float32Array; language: Language };
 
 export type WorkerResponse =
@@ -25,7 +28,7 @@ export type WorkerResponse =
   | { type: 'ready'; adapter: string; encoder: string } // what the model really runs on, for the status line
   | { type: 'progress'; progress: number } // transcription, 0..100
   | { type: 'partial'; text: string } // text so far, so the first chunk is not a silent wait
-  | { type: 'result'; text: string }
+  | { type: 'result'; text: string; segments: Segment[] }
   | { type: 'error'; message: string };
 
 // Quantisation per this checkpoint's model card: fp16 encoder + q4 decoder on WebGPU; without shader-f16 the
@@ -55,6 +58,22 @@ const pickWebGpu = async (): Promise<Picked> => {
   const fp16 = adapter.features.has('shader-f16');
   return { adapter: `WebGPU · ${label}`, dtype: fp16 ? { ...Q4, encoder_model: 'fp16' } : Q4 };
 };
+
+// The tokenizer types the pair as two numbers, but it really leaves the end (sometimes both ends) null on a
+// chunk it never closed — hence the wider type here and the normalisation below.
+type Chunk = { timestamp: (number | null)[]; text: string };
+
+const MIN_SEGMENT_S = 1.2; // what an unclosed last chunk gets, so no subtitle ends before it starts
+
+const toSegments = (chunks: Chunk[]): Segment[] =>
+  chunks.flatMap(({ timestamp: [start, end], text }, index): Segment[] => {
+    const trimmed = text.trim();
+    if (typeof start !== 'number' || trimmed === '') return [];
+
+    const nextStart = chunks[index + 1]?.timestamp[0];
+    const stop = typeof end === 'number' ? end : typeof nextStart === 'number' ? nextStart : 0;
+    return [{ start, end: stop > start ? stop : start + MIN_SEGMENT_S, text: trimmed }];
+  });
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 
@@ -119,10 +138,13 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
     task: 'transcribe',
     chunk_length_s: CHUNK_LENGTH_S,
     stride_length_s: STRIDE_LENGTH_S,
+    // Timestamps cost a few tokens per chunk and give us subtitles and chapters for free — always on.
+    return_timestamps: true,
     streamer,
   });
 
-  post({ type: 'result', text: (Array.isArray(output) ? output[0].text : output.text).trim() });
+  const { text: full, chunks = [] } = Array.isArray(output) ? output[0] : output;
+  post({ type: 'result', text: full.trim(), segments: toSegments(chunks) });
 };
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
