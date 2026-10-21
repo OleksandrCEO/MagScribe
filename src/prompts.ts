@@ -46,8 +46,8 @@ export const DEFAULT_PROMPTS: Prompts = { summary: SUMMARY_PROMPT, chapters: CHA
 
 /** Where an edited prompt is kept, and what the settings window calls it. */
 export const PROMPT_FIELDS: { task: AiTask; key: string; label: string }[] = [
-  { task: 'summary', key: 'prompt.summary', label: 'Конспект — «Вловити суть»' },
-  { task: 'chapters', key: 'prompt.chapters', label: 'Таймкоди — розділи відео' },
+  { task: 'summary', key: 'prompt.summary', label: 'Конспект — кнопка «Опрацювати»' },
+  { task: 'chapters', key: 'prompt.chapters', label: 'Таймкоди — для формування розділів' },
 ];
 
 // A prompt longer than this is a mistake, not a prompt; main refuses it and falls back to the default.
