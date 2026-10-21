@@ -90,24 +90,26 @@
     --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* Dark is a near-black charcoal, not black: #141414 for the window, each surface a step above it. Raising the
+   background alone would have flattened it against the card, so the whole ladder moved up with it. */
 @media (prefers-color-scheme: dark) {
   :root {
-        --background: oklch(0.145 0 0);
+        --background: oklch(0.191 0 0); /* #141414 */
         --foreground: oklch(0.985 0 0);
-        --card: oklch(0.205 0 0);
+        --card: oklch(0.235 0 0); /* #1e1e1e — the pill and the settings window */
         --card-foreground: oklch(0.985 0 0);
-        --popover: oklch(0.205 0 0);
+        --popover: oklch(0.235 0 0);
         --popover-foreground: oklch(0.985 0 0);
         --primary: oklch(0.922 0 0);
         --primary-foreground: oklch(0.205 0 0);
-        --secondary: oklch(0.269 0 0);
+        --secondary: oklch(0.295 0 0);
         --secondary-foreground: oklch(0.985 0 0);
-        --muted: oklch(0.269 0 0);
+        --muted: oklch(0.295 0 0); /* #2c2c2c — hover and the progress track */
         --muted-foreground: oklch(0.708 0 0);
-        --accent: oklch(0.269 0 0);
+        --accent: oklch(0.295 0 0);
         --accent-foreground: oklch(0.985 0 0);
         --destructive: oklch(0.704 0.191 22.216);
-        --border: oklch(1 0 0 / 10%);
+        --border: oklch(1 0 0 / 12%); /* a hair brighter: the lighter background eats some of the line */
         --input: oklch(1 0 0 / 15%);
         --ring: oklch(0.556 0 0);
         --chart-1: oklch(0.87 0 0);

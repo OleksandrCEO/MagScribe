@@ -119,7 +119,7 @@ const createWindow = () => {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     show: false, // avoid the white flash: shown on ready-to-show below
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#171717' : '#ffffff',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff',
     icon: path.join(__dirname, '../../assets/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -251,7 +251,7 @@ ipcMain.handle('audio:save', async (_event, fromPath: unknown, suggestedName: un
 ipcMain.on('theme:set', (_event, theme: unknown) => {
   if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return;
   nativeTheme.themeSource = theme;
-  mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#171717' : '#ffffff');
+  mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff');
 });
 
 ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true));

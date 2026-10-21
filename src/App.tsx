@@ -438,9 +438,20 @@ export default function App() {
         </div>
       )}
 
-      <div className="absolute top-5 left-6 flex items-center gap-2 text-muted-foreground">
-        <AudioLinesIcon className="size-4" />
-        <span className="text-[13px] font-medium text-foreground">MagScribe</span>
+      <div className="absolute top-5 left-6 flex items-center gap-2.5">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <AudioLinesIcon className="size-4" />
+          <span className="text-[13px] font-medium text-foreground">MagScribe</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          title="Налаштування"
+          className="-my-1.5 size-6.5 rounded-[7px] text-muted-foreground"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <SettingsIcon className="size-3.5" />
+        </Button>
       </div>
 
       <div className="absolute top-4 right-5 flex items-center gap-2">
@@ -449,15 +460,6 @@ export default function App() {
             <RotateCcwIcon /> Почати заново
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="Налаштування"
-          className="text-muted-foreground"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <SettingsIcon />
-        </Button>
         <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
           {themes.map(({ value, label, Icon }) => (
             <Button
@@ -533,7 +535,7 @@ export default function App() {
                 disabled={!file}
                 onClick={convertToAudio}
               >
-                <FileAudioIcon /> Конвертувати в аудіо
+                <FileAudioIcon /> Конвертувати
               </Button>
             </>
           )}
