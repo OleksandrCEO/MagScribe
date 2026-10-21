@@ -83,6 +83,7 @@ export default function App() {
   const [progress, setProgress] = useState<number | null>(null); // null while nothing is being transcribed
   const [transcript, setTranscript] = useState('');
   const [segments, setSegments] = useState<Segment[]>([]); // timestamped speech, behind the subtitles and chapters
+  const [subtitles, setSubtitles] = useState(''); // the .srt itself, so it can be fixed up before saving
   const [elapsed, setElapsed] = useState<number | null>(null); // seconds the last finished run took
   const [summary, setSummary] = useState('');
   const [chapters, setChapters] = useState('');
@@ -116,6 +117,7 @@ export default function App() {
       if (message.type === 'result') {
         setTranscript(message.text);
         setSegments(message.segments);
+        setSubtitles(toSrt(message.segments));
         setProgress(null);
         setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
         window.api.notify('MagScribe', `Транскрибація завершена — ${countWords(message.text)} слів`);
@@ -155,6 +157,7 @@ export default function App() {
   const clearResults = (): void => {
     setTranscript('');
     setSegments([]);
+    setSubtitles('');
     setSummary('');
     setChapters('');
     setView(mode);
@@ -306,7 +309,9 @@ export default function App() {
   // While it runs you watch the text stream in; the chosen view only takes over once there is a result.
   const screen = stage !== 'text' ? stage : busy ? 'transcript' : resultView;
   const done = transcript !== '' && !busy;
-  const srt = segments.length > 0 ? toSrt(segments) : '';
+  // Transcript, .srt and chapters are three editable texts; only the source differs.
+  const panelText = screen === 'subtitles' ? subtitles : screen === 'chapters' ? chapters : transcript;
+  const setPanelText = screen === 'subtitles' ? setSubtitles : screen === 'chapters' ? setChapters : setTranscript;
 
   const dropZone: ReactNode = (
     <div className="flex w-120 max-w-full flex-col gap-3.5">
@@ -433,16 +438,16 @@ export default function App() {
                 <Markdown>{summary}</Markdown>
               </div>
             ) : (
-              // Editable so misheard names and clumsy chapter titles can be fixed in place; the worker still
-              // streams into the transcript while it runs. The .srt is generated from the segments, so it is not.
+              // All three are editable in place — misheard names, subtitle wording before YouTube, clumsy
+              // chapter titles. The worker still streams into the transcript while it runs, so that one waits.
               <Textarea
                 className={cn(
                   panelClass,
                   'field-sizing-fixed resize-none border-border focus-visible:ring-0 md:text-[15px] dark:bg-background',
                 )}
-                value={screen === 'subtitles' ? srt : screen === 'chapters' ? chapters : transcript}
-                readOnly={busy || screen === 'subtitles'}
-                onChange={(event) => (screen === 'chapters' ? setChapters : setTranscript)(event.target.value)}
+                value={panelText}
+                readOnly={busy}
+                onChange={(event) => setPanelText(event.target.value)}
               />
             )}
           </div>
@@ -611,14 +616,14 @@ export default function App() {
               <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => setView('transcript')}>
                 <ArrowLeftIcon /> До тексту
               </Button>
-              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(srt)}>
+              <Button variant="ghost" size="lg" className="rounded-full px-3.5" onClick={() => copy(subtitles)}>
                 <ClipboardCopyIcon /> Копіювати
               </Button>
               <Button
                 variant="ghost"
                 size="lg"
                 className="rounded-full px-3.5"
-                onClick={() => save(window.api.saveText(srt, `${baseName}.srt`))}
+                onClick={() => save(window.api.saveText(subtitles, `${baseName}.srt`))}
               >
                 <DownloadIcon /> Зберегти .srt
               </Button>
