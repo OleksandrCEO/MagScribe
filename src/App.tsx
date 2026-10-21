@@ -98,7 +98,8 @@ type Job = { label: string; value?: number };
 export default function App() {
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'system'));
+  // Dark by default: this is a window people leave open through a long run, and the system's choice is one click away.
+  const [theme, setTheme] = useState<Theme>(() => readSetting(THEME_KEY, THEME_VALUES, 'dark'));
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the claude CLI gets
   const [language, setLanguage] = useState<Language>('uk');

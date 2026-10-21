@@ -341,6 +341,9 @@ ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: un
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
   Menu.setApplicationMenu(null);
+  // The app is dark unless told otherwise, and this is what the first frame is painted with: the renderer
+  // re-asserts the saved choice a moment later, but by then the window must not have flashed white.
+  nativeTheme.themeSource = 'dark';
   if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) protocol.handle(APP_SCHEME, serveBundle);
   createWindow();
 });

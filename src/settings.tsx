@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { EraserIcon, XIcon } from 'lucide-react';
+import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
@@ -109,7 +109,7 @@ export function SettingsDialog({ open, prompts, onPrompts, onClose }: SettingsPr
                   className="-my-1 text-muted-foreground"
                   onClick={() => onPrompts({ ...prompts, [task]: DEFAULT_PROMPTS[task] })}
                 >
-                  <EraserIcon /> Скинути
+                  Скинути
                 </Button>
               )}
             </div>
