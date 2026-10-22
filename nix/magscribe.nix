@@ -7,6 +7,9 @@
 #   nix-build nix/magscribe.nix -o /tmp/magscribe-result && nix profile install /tmp/magscribe-result
 #
 # Upgrading later is the same pair of commands plus `nix profile upgrade magscribe`.
+#
+# The flake's `packages.default` calls this same file with `app` taken from a GitHub release instead of `out/` —
+# that is the route a NixOS config installs by; see "Release" in CLAUDE.md.
 let
   # The same nixpkgs the dev shell runs on. Taking it from flake.lock instead of <nixpkgs> keeps the packaged
   # app on the revision the app was built and tested against, and costs no download: the flake already put that

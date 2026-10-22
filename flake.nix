@@ -7,6 +7,8 @@
     let
       systems = [ "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      inherit (builtins.fromJSON (builtins.readFile ./package.json)) version;
+      releases = "https://github.com/OleksandrCEO/MagScribe/releases/download";
     in
     {
       devShells = forAllSystems (pkgs: {
@@ -21,6 +23,20 @@
           # build — see nix/electron-libs.nix for what is in it and why.
           NIX_LD_LIBRARY_PATH =
             "/run/opengl-driver/lib:" + pkgs.lib.makeLibraryPath (import ./nix/electron-libs.nix pkgs);
+        };
+      });
+
+      # The installable app, for a NixOS config that takes this repository as an input. npm cannot run inside
+      # a Nix build (it needs the network), so the electron-forge output is a release asset and this only wraps
+      # it — the same wrapper `nix-build nix/magscribe.nix` applies to a local `out/`. Every release changes
+      # the hash: see "Release" in CLAUDE.md.
+      packages = forAllSystems (pkgs: {
+        default = import ./nix/magscribe.nix {
+          inherit pkgs;
+          app = pkgs.fetchzip {
+            url = "${releases}/v${version}/magscribe-${version}-linux-x64.tar.gz";
+            hash = "sha256-edc4AQHoblZiSvJyZc18CiF356skKZDlikExGgCwYxA=";
+          };
         };
       });
     };

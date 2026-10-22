@@ -36,6 +36,17 @@ Desktop app: converts video/audio files and transcribes them. Transcription runs
 - `npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result` — build the installable app, then `nix profile add /tmp/magscribe-result` puts MagScribe in the application menu (`install` is a deprecated alias and warns). A later build is a store path of its own, so replace it with `nix profile remove magscribe` first. See `nix/magscribe.nix`
 - On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `nix/electron-libs.nix`
 
+## Release
+
+The flake's `packages.default` is what a NixOS config installs (`inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`). It fetches the electron-forge output from the GitHub release `v<version>`, so a release is:
+
+1. bump `package.json`, then `npm run package`;
+2. `tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 -czf /tmp/agent/magscribe-<version>-linux-x64.tar.gz transcriber-linux-x64`;
+3. `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack file:///tmp/agent/magscribe-<version>-linux-x64.tar.gz)` → the `hash` in `flake.nix`;
+4. commit, then — only when the developer says so — tag `v<version>`, push, and `gh release create v<version> <tarball>`.
+
+The tarball must be the one the hash was taken from: rebuilding gives different bytes. Before the release exists, test the flake with `nix store add --name source <unpacked transcriber-linux-x64>` (that is the fixed-output path `fetchzip` would produce) and `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
+
 ## Gotchas
 
 - The renderer config MUST stay `.mts`. `@tailwindcss/vite` is ESM-only and Forge loads a `.ts` config as CJS — renaming it back breaks `npm start` with an opaque esbuild error.
