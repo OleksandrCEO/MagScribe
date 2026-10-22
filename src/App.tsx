@@ -43,6 +43,8 @@ import type { AiTask, Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
+  LANG_KEY,
+  MODEL_KEY,
   ModelPicker,
   SettingsDialog,
   readPrompts,
@@ -68,8 +70,6 @@ const countChapters = (text: string): number =>
 const PAINT_EVERY_MS = 500;
 
 const THEME_KEY = 'theme';
-const LANG_KEY = 'lang';
-const MODEL_KEY = 'model';
 
 // The labels live in i18n, keyed by the same value — `s.theme[value]`.
 const themes: { value: Theme; Icon: typeof SunIcon }[] = [
@@ -278,7 +278,7 @@ export default function App() {
     // A worker that fails to load its own module never posts anything, and the window would wait forever.
     worker.addEventListener('error', (event) => setModelError(event.message || s.error.workerFailed));
 
-    worker.postMessage({ type: 'load', lang: uiLang, model: id } satisfies WorkerRequest);
+    worker.postMessage({ type: 'load', lang: uiLang, model: id, offline: false } satisfies WorkerRequest);
   };
 
   // Mount only, and deliberately: one worker per window, and spawnWorker is re-created on every render.

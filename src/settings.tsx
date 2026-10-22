@@ -7,6 +7,10 @@ import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelSta
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
 import { cn } from 'cn';
 
+// Read by the window and by the command line's hidden one, which shares the origin and so the person's choices.
+export const LANG_KEY = 'lang';
+export const MODEL_KEY = 'model';
+
 // localStorage is keyed per origin and survives restarts. It can still throw (blocked storage), and a setting
 // that does not come back is not worth an error on screen.
 export const readSetting = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {

@@ -239,6 +239,25 @@ const uk = {
     restartApp: (message: string): string => `${message}. Перезапусти застосунок.`,
     fallback: (from: string, reason: string): string => `${from} недоступний: ${reason}`,
   },
+
+  // The command line (see cli.ts). Progress and errors go to stderr; stdout carries nothing but the result.
+  cli: {
+    usage:
+      'Використання: magscribe --transcribe <файл> [--format txt|srt|timed] [--lang uk|en|auto]\n'
+      + '  --format  txt — суцільний текст (типово), srt — субтитри, timed — рядки «[00:00] текст»\n'
+      + '  --lang    мова запису: uk (типово), en або auto — Whisper визначає сам\n'
+      + 'Результат іде в stdout, прогрес і помилки — у stderr. Модель береться та, що вибрана у вікні.',
+    notAFile: (file: string): string => `Не файл: ${file}`,
+    busy: 'MagScribe уже запущений. Закрий його вікно й повтори команду.',
+    guiBlocked: 'MagScribe зараз розшифровує файл із командного рядка. Відкрий вікно, коли він закінчить.',
+    noModel: (name: string): string =>
+      `Модель ${name} ще не завантажена. Відкрий MagScribe і завантаж її у вікні — командний рядок `
+      + 'сам нічого не качає.',
+    engine: (adapter: string): string => `Рушій: ${adapter}`,
+    reading: (percent: number): string => `Читаю звук: ${percent}%`,
+    transcribing: (percent: number): string => `Розшифровую: ${percent}%`,
+    merging: 'Зшиваю фрагменти…',
+  },
 };
 
 const en: typeof uk = {
@@ -443,6 +462,24 @@ const en: typeof uk = {
     gpuGone: (reason: string, code: number): string => `The GPU process exited (${reason}, code ${code})`,
     restartApp: (message: string): string => `${message}. Restart the app.`,
     fallback: (from: string, reason: string): string => `${from} is unavailable: ${reason}`,
+  },
+
+  cli: {
+    usage:
+      'Usage: magscribe --transcribe <file> [--format txt|srt|timed] [--lang uk|en|auto]\n'
+      + '  --format  txt — plain text (default), srt — subtitles, timed — lines of «[00:00] text»\n'
+      + '  --lang    the language of the recording: uk (default), en, or auto to let Whisper detect it\n'
+      + 'The result goes to stdout, progress and errors to stderr. The model is the one chosen in the window.',
+    notAFile: (file: string): string => `Not a file: ${file}`,
+    busy: 'MagScribe is already running. Close its window and run the command again.',
+    guiBlocked: 'MagScribe is transcribing a file from the command line. Open the window once it is done.',
+    noModel: (name: string): string =>
+      `The ${name} model is not downloaded yet. Open MagScribe and download it there — the command line `
+      + 'downloads nothing.',
+    engine: (adapter: string): string => `Engine: ${adapter}`,
+    reading: (percent: number): string => `Reading audio: ${percent}%`,
+    transcribing: (percent: number): string => `Transcribing: ${percent}%`,
+    merging: 'Stitching the chunks…',
   },
 };
 

@@ -32,8 +32,9 @@ export type Language = 'uk' | 'en' | null;
 
 // `lang` is the interface language, for the few messages of ours that reach the screen — not the speech one.
 // It arrives with `load` only: a worker is spawned on mount and after every stop, which is often enough.
+// `offline` is the command line's: it may only use what is cached, since nobody is there to agree to a download.
 export type WorkerRequest =
-  | { type: 'load'; lang: UiLang; model: ModelId }
+  | { type: 'load'; lang: UiLang; model: ModelId; offline: boolean }
   | { type: 'transcribe'; audio: Float32Array; language: Language };
 
 export type WorkerResponse =
@@ -154,7 +155,13 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
-  if (request.type === 'load') setUiLang(request.lang);
+  if (request.type === 'load') {
+    setUiLang(request.lang);
+    // The Cache Storage is read first either way. transformers.js refuses a setup with both sources off, so
+    // offline turns on the «local» one instead — it looks under /models/ on our own origin, where nothing is.
+    env.allowLocalModels = request.offline;
+    env.allowRemoteModels = !request.offline;
+  }
   const done = request.type === 'load' ? load(request.model) : transcribe(request.audio, request.language);
 
   done.catch((error: unknown) => {

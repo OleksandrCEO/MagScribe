@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import type { CliJob } from './cli';
 import type { UiLang } from './i18n';
+import type { Segment } from './subtitles';
 
 export type SelectedFile = { path: string; name: string; size: number };
 export type ExportedAudio = { path: string; size: number }; // an OGG/Opus file in the temp folder, see audio.ts
@@ -65,6 +67,12 @@ const api = {
   // Main reports a crashed GPU process here; the model is gone with it, so the UI must stop waiting.
   onGpuGone: (listener: (message: string) => void): (() => void) =>
     subscribe('gpu:gone', (_event, message: unknown) => listener(String(message))),
+  // The command line's hidden window (see headless.ts): what to transcribe, the lines for stderr, the answer.
+  // Main registers these only in CLI mode, so the ordinary window gets nothing out of calling them.
+  cliJob: (): Promise<Pick<CliJob, 'file' | 'language'>> => ipcRenderer.invoke('cli:job'),
+  cliLog: (line: string): void => ipcRenderer.send('cli:log', line),
+  cliDone: (text: string, segments: Segment[]): void => ipcRenderer.send('cli:done', text, segments),
+  cliFail: (message: string): void => ipcRenderer.send('cli:fail', message),
 };
 
 contextBridge.exposeInMainWorld('api', api);

@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  type BrowserWindowConstructorOptions,
   clipboard,
   Menu,
   Notification,
@@ -19,6 +20,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
+import { parseCli, renderOutput, type CliJob } from './cli';
 import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
 import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { MAX_BROWSER_DECODE } from './pcm';
@@ -164,8 +166,39 @@ const setWorking = (value: boolean): void => {
   }
 };
 
+/**
+ * A window on our own bundle that cannot leave it. `hash` picks the renderer: `#cli` is the command line's.
+ *
+ * The preload is attached to every navigation this webContents makes, so a page outside the bundle would get
+ * the whole window.api — and with it the claude CLI. The summary is markdown from a model that read an
+ * untrusted recording, and react-markdown renders https links as clickable. Nothing here ever needs to leave
+ * the bundle, so nothing is allowed to.
+ */
+const openBundle = (options: BrowserWindowConstructorOptions, hash = ''): BrowserWindow => {
+  const window = new BrowserWindow({
+    ...options,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true, // the default, spelled out: the preload below relies on it
+      ...options.webPreferences,
+    },
+  });
+
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(`${APP_ORIGIN}/`)) return;
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
+    event.preventDefault();
+  });
+
+  window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL || `${APP_ORIGIN}/index.html`}${hash}`);
+  return window;
+};
+
 const createWindow = () => {
-  mainWindow = new BrowserWindow({
+  mainWindow = openBundle({
     ...readBounds(), // no saved x/y -> Electron centers the window itself
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
@@ -173,26 +206,9 @@ const createWindow = () => {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff',
     // The asar holds only the bundle, so the packaged app reads the icon from resources/ (see forge.config.ts).
     icon: app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '../../assets/icon.png'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true, // the default, spelled out: the preload below relies on it
-    },
   });
 
   const window = mainWindow;
-
-  // The preload is attached to every navigation this webContents makes, so a page outside the bundle would get
-  // the whole window.api — and with it the claude CLI. The summary is markdown from a model that read an
-  // untrusted recording, and react-markdown renders https links as clickable. Nothing here ever needs to leave
-  // the bundle, so nothing is allowed to.
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith(`${APP_ORIGIN}/`)) return;
-    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
-    event.preventDefault();
-  });
 
   const show = (): void => {
     if (!window.isDestroyed() && !window.isVisible()) window.show();
@@ -217,9 +233,56 @@ const createWindow = () => {
     closing = true;
     window.webContents.send('close:ask');
   });
+};
 
-  // and load the index.html of the app.
-  window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL || `${APP_ORIGIN}/index.html`);
+/** Writes and then exits: app.exit does not wait for a pipe, and a cut-off .srt is worse than none. */
+const exitWith = (code: number, stream: NodeJS.WriteStream, text: string): void => {
+  stream.write(text, () => app.exit(code));
+};
+
+// Set while a command-line run is in flight; the GPU crash handler below fails it through this.
+let cliFail: ((message: string) => void) | null = null;
+
+/**
+ * Runs one `--transcribe` job in a hidden window (see headless.ts) and exits: 0 with the result on stdout, or 1
+ * with the reason on stderr. The model needs the window's Chromium — WebGPU and the Cache Storage it lives in.
+ */
+const runCli = (job: CliJob): void => {
+  let window: BrowserWindow | null = null;
+  let finished = false;
+
+  const finish = (code: number, stream: NodeJS.WriteStream, text: string): void => {
+    if (finished) return;
+    finished = true;
+    cleanup(); // app.exit skips will-quit
+    exitWith(code, stream, text);
+  };
+  const fail = (message: string): void => finish(1, process.stderr, `${message}\n`);
+  cliFail = fail;
+
+  // Only the hidden window may talk on these; the channels exist in this mode alone.
+  const ours = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean =>
+    window !== null && event.sender === window.webContents;
+
+  ipcMain.handle('cli:job', (event) => {
+    if (!ours(event)) throw new Error('cli:job: not the command line window');
+    return { file: job.file, language: job.language };
+  });
+  ipcMain.on('cli:log', (event, line: unknown) => {
+    if (ours(event) && !finished) process.stderr.write(`${String(line)}\n`);
+  });
+  ipcMain.on('cli:fail', (event, message: unknown) => {
+    if (ours(event)) fail(String(message));
+  });
+  ipcMain.on('cli:done', (event, text: unknown, segments: unknown) => {
+    if (!ours(event)) return;
+    if (typeof text !== 'string' || !Array.isArray(segments)) return fail('cli:done: malformed result');
+    finish(0, process.stdout, renderOutput(job.format, text, segments));
+  });
+
+  setWorking(true); // the same sleep guard a run in the window gets
+  window = openBundle({ show: false, webPreferences: { backgroundThrottling: false } }, '#cli');
+  window.webContents.on('render-process-gone', (_event, details) => fail(`renderer gone: ${details.reason}`));
 };
 
 const rendererRoot = (): string => path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}`);
@@ -250,7 +313,10 @@ const serveBundle = async (request: Request): Promise<Response> => {
   // path.join normalises the "..", so this catches both plain and percent-encoded traversal.
   if (file !== root && !file.startsWith(root + path.sep)) return new Response(null, { status: 403 });
 
-  const response = await net.fetch(pathToFileURL(file).toString());
+  // A missing file rejects instead of answering 404. The offline worker asks for /models/… on purpose (see
+  // worker.ts), and a rejection here would land in stderr as a bare `net::ERR_FILE_NOT_FOUND`.
+  const response = await net.fetch(pathToFileURL(file).toString()).catch(() => null);
+  if (response === null) return new Response(null, { status: 404 });
   const headers = new Headers(response.headers);
   headers.set('Content-Security-Policy', CSP);
   return new Response(response.body, { status: response.status, headers });
@@ -447,9 +513,42 @@ app.on('ready', () => {
   // The app is dark unless told otherwise, and this is what the first frame is painted with: the renderer
   // re-asserts the saved choice a moment later, but by then the window must not have flashed white.
   nativeTheme.themeSource = 'dark';
+
+  const cli = parseCli(process.argv.slice(1));
+  if (cli === 'help') return exitWith(0, process.stdout, `${t().cli.usage}\n`);
+  if (typeof cli === 'string') return exitWith(2, process.stderr, `${cli}\n${t().cli.usage}\n`);
+
+  // One process per profile: the window and the command line share the model cache and the settings. The
+  // `cli` flag tells the instance that holds the lock who knocked — see `second-instance` below.
+  if (!app.requestSingleInstanceLock({ cli: cli !== null })) {
+    if (cli === null) app.quit();
+    else exitWith(1, process.stderr, `${t().cli.busy}\n`);
+    return;
+  }
+
   if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) protocol.handle(APP_SCHEME, serveBundle);
   discardStaleExports();
-  createWindow();
+  if (cli === null) return createWindow();
+
+  const file = path.resolve(cli.file);
+  try {
+    if (!fs.statSync(file).isFile()) throw new Error();
+  } catch {
+    return exitWith(2, process.stderr, `${t().cli.notAFile(file)}\n`);
+  }
+  runCli({ ...cli, file });
+});
+
+// A second launch: a window comes to the front, and a window started during a command-line run hears why it
+// did not open. A command line that knocks on a running window is turned away on its own side and needs nothing.
+app.on('second-instance', (_event, _argv, _cwd, data) => {
+  if ((data as { cli?: unknown } | null)?.cli === true) return;
+  if (cliFail !== null) {
+    void dialog.showMessageBox({ type: 'info', message: t().cli.guiBlocked });
+    return;
+  }
+  if (mainWindow?.isMinimized()) mainWindow.restore();
+  mainWindow?.focus();
 });
 
 // Whether the machine has an ffmpeg at all; the window asks once and offers the download page if it has not.
@@ -458,12 +557,14 @@ ipcMain.handle('ffmpeg:present', (): boolean => ffmpegBinary() !== null);
 // The one external link the app opens, and it is a constant: nothing from the renderer reaches shell.
 ipcMain.on('ffmpeg:download', () => void shell.openExternal('https://ffmpeg.org/download.html'));
 
-app.on('will-quit', () => {
+const cleanup = (): void => {
   cancelFfmpeg(); // a conversion still running would outlive the window
   cancelAi(); // and so would a claude run
   discardExport();
   releaseInhibitor(); // the pipe would do it anyway; this is the tidy way out
-});
+};
+
+app.on('will-quit', cleanup);
 
 // A dead GPU process takes the WebGPU device and the model with it; the renderer would otherwise wait forever at 0 %.
 app.on('child-process-gone', (_event, details) => {
@@ -480,6 +581,7 @@ app.on('child-process-gone', (_event, details) => {
   }
   fs.appendFile(log, `${line}\n`, () => {});
   mainWindow?.webContents.send('gpu:gone', t().error.gpuGone(details.reason, details.exitCode));
+  cliFail?.(t().error.gpuGone(details.reason, details.exitCode));
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
