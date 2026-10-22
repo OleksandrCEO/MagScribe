@@ -74,11 +74,11 @@
 файл і помітно кращий результат, ніж 4 біти), а на відеокарті — у q4, бо для int8 у WebGPU-бекенді немає ядер
 і прогін сповзає на CPU.
 
-Кеш лежить у `~/.config/transcriber/Service Worker/CacheStorage/`. Кнопка «Видалити» в налаштуваннях прибирає
+Кеш лежить у `~/.config/magscribe/Service Worker/CacheStorage/`. Кнопка «Видалити» в налаштуваннях прибирає
 звідти одну модель; усе разом зносить тека:
 
 ```bash
-rm -rf ~/.config/transcriber/Service\ Worker/CacheStorage
+rm -rf ~/.config/magscribe/Service\ Worker/CacheStorage
 ```
 
 Кеш партиціюється за origin, тому запакований застосунок і кожен dev-сервер тримають **власні** копії ваг. Якщо

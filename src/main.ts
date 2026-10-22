@@ -62,6 +62,21 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+// Our data lives in ~/.config/magscribe. Electron would name the folder after productName, which has to stay
+// `transcriber` (the Wayland app_id and the desktop entry match on it), so the path is set by hand, before anything
+// reads it. A profile from before the rename is moved over once: one rename on the same filesystem, so the model
+// in it stays where Chromium expects it. Should the move fail, the old folder keeps serving rather than a blank one.
+const userData = path.join(app.getPath('appData'), 'magscribe');
+const legacyUserData = path.join(app.getPath('appData'), 'transcriber');
+if (!fs.existsSync(userData) && fs.existsSync(legacyUserData)) {
+  try {
+    fs.renameSync(legacyUserData, userData);
+  } catch (error) {
+    console.error(`could not move ${legacyUserData} to ${userData}:`, error);
+  }
+}
+app.setPath('userData', fs.existsSync(userData) || !fs.existsSync(legacyUserData) ? userData : legacyUserData);
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
@@ -188,12 +203,10 @@ const openBundle = (options: BrowserWindowConstructorOptions, hash = ''): Browse
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith(`${APP_ORIGIN}/`)) return;
-    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
-    event.preventDefault();
+    if (!url.startsWith(`${APP_ORIGIN}/`)) event.preventDefault();
   });
 
-  window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL || `${APP_ORIGIN}/index.html`}${hash}`);
+  window.loadURL(`${APP_ORIGIN}/index.html${hash}`);
   return window;
 };
 
@@ -321,6 +334,19 @@ const serveBundle = async (request: Request): Promise<Response> => {
   headers.set('Content-Security-Policy', CSP);
   return new Response(response.body, { status: response.status, headers });
 };
+
+/**
+ * A dev run answers app:// from the Vite dev server instead of the bundle. Chromium keys Cache Storage and
+ * localStorage by origin, so on its own localhost origin a dev window saw neither the downloaded model nor the
+ * person's settings; on app://bundle it shares both with the installed app. HMR still works: Vite's client
+ * cannot reach a socket on app:// and falls back to the dev server's own address.
+ */
+const serveDev =
+  (devServer: string) =>
+  (request: Request): Promise<Response> => {
+    const { pathname, search } = new URL(request.url);
+    return net.fetch(new URL(`${pathname}${search}`, devServer).toString());
+  };
 
 // The renderer never touches the filesystem: it gets a path only from this native dialog.
 ipcMain.handle('file:select', async (): Promise<SelectedFile | null> => {
@@ -526,7 +552,7 @@ app.on('ready', () => {
     return;
   }
 
-  if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) protocol.handle(APP_SCHEME, serveBundle);
+  protocol.handle(APP_SCHEME, MAIN_WINDOW_VITE_DEV_SERVER_URL ? serveDev(MAIN_WINDOW_VITE_DEV_SERVER_URL) : serveBundle);
   discardStaleExports();
   if (cli === null) return createWindow();
 
