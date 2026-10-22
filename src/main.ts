@@ -62,21 +62,6 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// Our data lives in ~/.config/magscribe. Electron would name the folder after productName, which has to stay
-// `transcriber` (the Wayland app_id and the desktop entry match on it), so the path is set by hand, before anything
-// reads it. A profile from before the rename is moved over once: one rename on the same filesystem, so the model
-// in it stays where Chromium expects it. Should the move fail, the old folder keeps serving rather than a blank one.
-const userData = path.join(app.getPath('appData'), 'magscribe');
-const legacyUserData = path.join(app.getPath('appData'), 'transcriber');
-if (!fs.existsSync(userData) && fs.existsSync(legacyUserData)) {
-  try {
-    fs.renameSync(legacyUserData, userData);
-  } catch (error) {
-    console.error(`could not move ${legacyUserData} to ${userData}:`, error);
-  }
-}
-app.setPath('userData', fs.existsSync(userData) || !fs.existsSync(legacyUserData) ? userData : legacyUserData);
-
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();

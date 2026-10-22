@@ -23,7 +23,7 @@ in
 {
   pkgs ? import lockedNixpkgs { },
   # Where electron-forge writes; the directory is named after productName in package.json.
-  app ? ../out/transcriber-linux-x64,
+  app ? ../out/magscribe-linux-x64,
 }:
 
 let
@@ -31,7 +31,7 @@ let
 
   # The Wayland app_id Electron reports is app.getName(), i.e. productName. KDE ties a window to its menu entry
   # (and with it the taskbar icon) by matching that against the desktop file's name, so both must stay this.
-  appId = "transcriber";
+  appId = "magscribe";
 in
 pkgs.stdenv.mkDerivation {
   pname = "magscribe";
@@ -79,7 +79,7 @@ pkgs.stdenv.mkDerivation {
   '';
 
   postFixup = ''
-    makeWrapper $out/lib/magscribe/transcriber $out/bin/magscribe \
+    makeWrapper $out/lib/magscribe/magscribe $out/bin/magscribe \
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
       --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]} \
       --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.systemd ]} \

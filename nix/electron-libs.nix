@@ -1,6 +1,6 @@
 # Every shared library the npm Electron binary links against, in one place: nix-ld feeds them to the dev run
 # (`flake.nix`) and autoPatchelfHook links the packaged build against them (`nix/magscribe.nix`). Keep the two
-# in sync by keeping the list here — `patchelf --print-needed` over `out/transcriber-linux-x64` says what is
+# in sync by keeping the list here — `patchelf --print-needed` over `out/magscribe-linux-x64` says what is
 # missing if Electron ever gains a dependency.
 #
 # vulkan-loader is the odd one out, and it is not what makes WebGPU work: Electron ships its own libvulkan.so.1
