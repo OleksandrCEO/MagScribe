@@ -127,3 +127,6 @@ public/ort/
 
 # Personal working notes, not part of this project
 docs/claude.md
+
+# The developer's own screenshots; they live in the working tree on purpose and never in git.
+/screens/

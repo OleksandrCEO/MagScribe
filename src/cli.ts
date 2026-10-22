@@ -15,6 +15,13 @@ const LANGS: Record<string, Language> = { uk: 'uk', en: 'en', auto: null };
 
 export type CliJob = { file: string; format: CliFormat; language: Language };
 
+/** English only, whatever the interface speaks: this is read by scripts and by other tools' models. */
+export const USAGE = `Usage: magscribe --transcribe <file> [--format txt|srt|timed] [--lang uk|en|auto]
+  --format  txt: plain text (default), srt: subtitles, timed: lines of "[00:00] text"
+  --lang    the language of the recording: uk (default), en, or auto to let Whisper detect it
+The result goes to stdout, progress and errors to stderr. The model is the one chosen in the window.
+`;
+
 /**
  * `null` — no CLI flag at all, so this is an ordinary window start. `help` — print the usage. A string is what
  * is wrong with the arguments. Lenient on purpose: argv also carries Chromium's own switches and, in dev, `.`.

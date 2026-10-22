@@ -20,7 +20,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
-import { parseCli, renderOutput, type CliJob } from './cli';
+import { parseCli, renderOutput, USAGE, type CliJob } from './cli';
 import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
 import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { MAX_BROWSER_DECODE } from './pcm';
@@ -526,8 +526,8 @@ app.on('ready', () => {
   nativeTheme.themeSource = 'dark';
 
   const cli = parseCli(process.argv.slice(1));
-  if (cli === 'help') return exitWith(0, process.stdout, `${t().cli.usage}\n`);
-  if (typeof cli === 'string') return exitWith(2, process.stderr, `${cli}\n${t().cli.usage}\n`);
+  if (cli === 'help') return exitWith(0, process.stdout, USAGE);
+  if (typeof cli === 'string') return exitWith(2, process.stderr, `${cli}\n${USAGE}`);
 
   // One process per profile: the window and the command line share the model cache and the settings. The
   // `cli` flag tells the instance that holds the lock who knocked — see `second-instance` below.

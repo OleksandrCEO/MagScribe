@@ -35,7 +35,7 @@
           inherit pkgs;
           app = pkgs.fetchzip {
             url = "${releases}/v${version}/magscribe-${version}-linux-x64.tar.gz";
-            hash = "sha256-6Z4NM0Gjea+rEXPV+csi5k1vnnqsfhNCwMgkIPod5Zc=";
+            hash = "sha256-PTidY01v6VpU5Z59qlHLSMOL292+sikGnuPZQZjR6qI=";
           };
         };
       });

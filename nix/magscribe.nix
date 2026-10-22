@@ -83,8 +83,15 @@ pkgs.stdenv.mkDerivation {
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
       --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]} \
       --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.systemd ]} \
-      --add-flags "--force-device-scale-factor=1"
+      --add-flags "--force-device-scale-factor=1" \
+      --run 'case " $* " in *" --transcribe"*|*" --help "*) set -- --log-level=3 "$@" ;; esac'
   '';
+
+  # The `--run` line is for the command line (src/cli.ts): its stdout is the result and its stderr is read by a
+  # person or a script, and Chromium's ERROR logging would otherwise add a line there on every run — the GPU
+  # process saying that Wayland and Vulkan do not mix, which changes nothing, printed after the prompt is back.
+  # It has to be a real argument: `app.commandLine.appendSwitch('log-level')` from main.ts does not reach the GPU
+  # process. A window keeps the full logging, which is what a GPU problem is diagnosed from.
 
   # systemd is a suffix, not a prefix: the session's own systemd-inhibit wins, and this is only the fallback
   # for a launcher that starts the app with a bare PATH. main.ts holds a logind inhibitor through it for as
