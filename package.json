@@ -1,7 +1,7 @@
 {
   "name": "magscribe",
   "productName": "magscribe",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "Desktop app that transcribes video and audio on your own machine: text, .srt subtitles and chapter timecodes",
   "main": ".vite/build/main.js",
   "private": true,

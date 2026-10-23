@@ -103,39 +103,40 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
   if (!transcriber) throw new Error(t().error.modelNotLoaded);
 
   const duration = audio.length / SAMPLE_RATE;
+  // The pipeline's own window loop: windows start every JUMP_S, the last is the first that reaches the end.
+  const windows = duration > CHUNK_LENGTH_S ? Math.ceil((duration - CHUNK_LENGTH_S) / JUMP_S) + 1 : 1;
 
   // The pipeline types its tokenizer as the generic base class; for whisper it really is a WhisperTokenizer.
   const tokenizer = transcriber.tokenizer as ConstructorParameters<typeof WhisperTextStreamer>[0];
 
   let text = '';
 
-  // Counting generate() calls would be wrong here. With return_timestamps the model takes the seek path
-  // (`_generate_with_seek`): when it stops short inside a 30-second window it re-encodes the remainder and
-  // generates again, so one window costs one call or several, and the count runs ahead of the audio.
-  // What every pass does report is the timestamp it stopped at, i.e. how much of its segment it ate. Those add
-  // up to the whole window, and consecutive windows overlap, so JUMP/WINDOW turns eaten audio into new audio.
-  let consumed = 0; // seconds of audio the passes have chewed through, counting each window whole
-  let lastEnd = 0; // the last timestamp inside the pass that is running
+  // Progress counts finished 30-second windows. Two earlier counters ran ahead of the audio:
+  // - streamer.end() fires per pass, not per window — return_timestamps takes the seek path
+  //   (`_generate_with_seek`), which generates again whenever the model stops short inside a window;
+  // - summing the timestamps each pass stopped at overshoots too, because a repeat pass runs on the rest of the
+  //   window padded with silence, and Whisper puts timestamps on that silence up to 30 s.
+  // The pipeline calls `model.generate` exactly once per window; the repeat passes go through `super.generate`
+  // inside it, past this wrapper. So the wrapped call is the one count that cannot outrun the audio.
+  const { model } = transcriber;
+  const generate = model.generate;
+  let done = 0;
+  model.generate = async (...args: Parameters<typeof generate>) => {
+    const result = await generate.apply(model, args);
+    done += 1;
+    // `covered` is where a stopped run resumes: every window but the last adds JUMP_S of new audio.
+    post({ type: 'progress', progress: (done / windows) * 100, covered: Math.min(duration, done * JUMP_S) });
+    // The last window is not the end of the run: decode_asr still has to resolve the overlap between every pair
+    // of windows and turn timestamp tokens into spans. Nothing reports from in there.
+    if (done >= windows) post({ type: 'merging' });
+    return result;
+  };
 
   const streamer = new WhisperTextStreamer(tokenizer, {
     // Chunks take a while, so stream the words out as they are decoded instead of waiting for the chunk.
     callback_function: (piece: string) => {
       text += piece;
       post({ type: 'partial', text });
-    },
-    on_chunk_end: (time: number) => {
-      lastEnd = time;
-    },
-    // end() runs once per generate() call — one or more of them per 30-second window.
-    on_finalize: () => {
-      consumed += lastEnd || CHUNK_LENGTH_S; // a pass that emitted no timestamp swallowed its whole segment
-      lastEnd = 0;
-
-      const covered = duration > 0 ? Math.min(duration, consumed * (JUMP_S / CHUNK_LENGTH_S)) : 0;
-      post({ type: 'progress', progress: duration > 0 ? (covered / duration) * 100 : 100, covered });
-      // Reaching the end of the audio is not the end of the run: decode_asr still has to resolve the overlap
-      // between every pair of windows and turn timestamp tokens into spans. Nothing reports from in there.
-      if (covered >= duration) post({ type: 'merging' });
     },
   });
 
@@ -147,6 +148,8 @@ const transcribe = async (audio: Float32Array, language: Language): Promise<void
     // Timestamps cost a few tokens per chunk and give us subtitles and chapters for free — always on.
     return_timestamps: true,
     streamer,
+  }).finally(() => {
+    model.generate = generate;
   });
 
   const { text: full, chunks = [] } = Array.isArray(output) ? output[0] : output;
