@@ -1,5 +1,5 @@
 /**
- * The OpenAI-compatible chat API — one request shape that OpenAI, OpenRouter, Groq, DeepSeek, ollama, LM Studio,
+ * The OpenAI-compatible chat API — one request shape that OpenAI, OpenRouter, Groq, ollama, LM Studio,
  * llama.cpp and vLLM all answer. Pure functions and types only: main sends the request (summary.ts) and keeps the
  * settings (aiSettings.ts), the settings window imports the types, and `api.test.ts` covers the rest.
  */
