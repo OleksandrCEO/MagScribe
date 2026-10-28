@@ -69,16 +69,19 @@ export const SUMMARY_PROVIDERS: Provider[] = [
       { id: 'mistral-large-latest', tier: 'smart' },
     ],
   },
-  {
-    name: 'ollama',
-    baseUrl: 'http://localhost:11434/v1',
-    models: [
-      { id: 'gemma4:e4b', tier: 'light' },
-      { id: 'llama3.2:3b', tier: 'light' },
-      { id: 'gemma4:31b', tier: 'smart' },
-      { id: 'gpt-oss:20b', tier: 'smart' },
-    ],
-  },
-  // LM Studio names models after the files loaded into it, so there is nothing to suggest.
-  { name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', models: [] },
 ];
+
+/**
+ * «Локально» for the summary: ollama's address and models. Any other local server (LM Studio, llama.cpp, vLLM) is
+ * its own address typed in.
+ */
+export const LOCAL: Provider = {
+  name: 'ollama',
+  baseUrl: 'http://localhost:11434/v1',
+  models: [
+    { id: 'gemma4:e4b', tier: 'light' },
+    { id: 'llama3.2:3b', tier: 'light' },
+    { id: 'gemma4:31b', tier: 'smart' },
+    { id: 'gpt-oss:20b', tier: 'smart' },
+  ],
+};

@@ -16,7 +16,7 @@ import {
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
-import { DEEPGRAM, SUMMARY_PROVIDERS, type Provider } from '@/providers';
+import { DEEPGRAM, LOCAL, SUMMARY_PROVIDERS, type Provider } from '@/providers';
 import { cn } from 'cn';
 
 // Read by the window and by the command line's hidden one, which shares the origin and so the person's choices.
@@ -248,6 +248,9 @@ const formOf = ({ engine, speech, apis }: AiSettings): Form => ({
 const fill = (preset: Provider | null): Connection =>
   preset ? { baseUrl: preset.baseUrl, model: preset.models[0]?.id ?? '' } : { baseUrl: '', model: '' };
 
+/** What «Локально» starts from: ollama for the summary; the transcription has no such server to point at. */
+const localFor = (role: ApiRole): Provider | null => (role === 'summary' ? LOCAL : null);
+
 /** The form with the transcription on an API: the one set up before, or Deepgram when there is none. */
 const withApiSpeech = (form: Form, before: SpeechEngine): Form => {
   const { baseUrl } = form.apis.speech;
@@ -324,7 +327,7 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
     setForm({
       ...form,
       ...(role === 'speech' && { speech: preset ? 'deepgram' : 'api' }),
-      apis: { ...form.apis, [role]: fill(preset) },
+      apis: { ...form.apis, [role]: fill(preset ?? localFor(role)) },
     });
 
   /** One engine's API: the preset (or «Локально»), the address, the model with the preset's suggestions, the key. */
@@ -375,7 +378,7 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
             {/* The preset's models as suggestions; any other id can still be typed. */}
             <Input list={list} {...text('model')} />
             <datalist id={list}>
-              {preset?.models.map(({ id, tier }) => (
+              {(preset ?? localFor(role))?.models.map(({ id, tier }) => (
                 <option key={id} value={id} label={tier && s.settings.tier[tier]} />
               ))}
             </datalist>

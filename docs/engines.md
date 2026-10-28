@@ -76,8 +76,8 @@
 - Пресети в налаштуваннях (`src/providers.ts`): підставляють адресу й першу модель, решта моделей — підказки
   в полі (`<datalist>`) з позначкою «дешевша / легша / розумніша», будь-яку іншу можна вписати. Цін у текстах
   немає. Розшифровка: Deepgram (`nova-3`, `nova-2`) і «Локально» — будь-який OpenAI-сумісний
-  `/audio/transcriptions`. Конспект: OpenAI, OpenRouter, Gemini, Anthropic, Mistral, ollama, LM Studio (лише
-  адреса — id моделей у нього свої) і «Локально». Застереження:
+  `/audio/transcriptions`. Конспект: OpenAI, OpenRouter, Gemini, Anthropic, Mistral і «Локально» — він
+  підставляє адресу й моделі ollama, а LM Studio, llama.cpp чи vLLM — це просто своя адреса в тому ж полі. Застереження:
   - Gemini: OpenAI-сумісність у Google досі в статусі beta.
   - Anthropic: свій OpenAI-сумісний шар Anthropic називає «для тестування й порівняння», не довгостроковим
     production-рішенням; id з дефісами (`claude-haiku-5-5`), а в OpenRouter — з крапкою.
