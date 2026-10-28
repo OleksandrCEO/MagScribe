@@ -43,7 +43,7 @@ The flake's `packages.default` is what a NixOS config installs (`inputs.magscrib
 1. bump `package.json`, then `npm run package`;
 2. `tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 -czf /tmp/agent/magscribe-<version>-linux-x64.tar.gz magscribe-linux-x64`;
 3. `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack file:///tmp/agent/magscribe-<version>-linux-x64.tar.gz)` → the `hash` in `flake.nix`;
-4. commit, then — only when the developer says so — tag `v<version>`, push, and `gh release create v<version> <tarball>`.
+4. commit and push, then — only when the developer says so — tag `v<version>`, push the tag, and `gh release create v<version> <tarball>`.
 
 The tarball must be the one the hash was taken from: rebuilding gives different bytes. Before the release exists, test the flake with `nix store add --name source <unpacked magscribe-linux-x64>` (that is the fixed-output path `fetchzip` would produce) and `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
 
@@ -104,17 +104,15 @@ The tarball must be the one the hash was taken from: rebuilding gives different 
 
 ## Git
 
-- Claude makes the commits in this project — this overrides the global "never commit" rule.
-- **Commit a group of work, never a single edit.** A commit per tweak is noise the developer does not want to read, and it is the most common thing to get wrong here. When in doubt, wait.
-- Commit when one of these is true, and otherwise do not commit at all — and do not mention it either:
-  - the developer asks for it;
-  - the next request is clearly a different kind of work from what came before — close the previous group first, then start the new one;
-  - a burst of small requests has piled up: group them roughly every five messages so the history stays readable.
+- **Claude runs git in this project, fully**: commits, branches, merges, rebases of its own unpushed work, push to
+  `origin`. No need to ask first, and no need to wait for a trigger.
+- **Commit a finished piece of work, not every edit.** One logical change per commit — a feature, a fix, a docs
+  pass — so the history reads well. Several small tweaks in a row go into one commit, not five.
 - Commit format: `scope: description` (e.g. `window: restore size and position on launch`).
 - **Version: one commit, one patch.** `package.json` holds `0.x.y`; bump `y` by one in the same commit, and
   roll the tenth into the next minor (`0.7.9` → `0.8.0`), so a minor reads as «ten improvements». Nothing
   else carries a version: `nix/magscribe.nix` and the About window both read this field. `1.0.0` comes when
   the app is actually released, not before.
-- **Tags only when the developer asks for one.** Not per minor, not per release-looking commit — a tag is his
-  call, the same way a push is.
-- Push only when asked.
+- **A release is the developer's call**: the tag `v<version>` and `gh release create` publish a build that the
+  flake installs from, so they wait for the developer's word (see Release above). Pushing commits does not.
+- Never rewrite history that is already on `origin` (no force-push to `main`).
