@@ -33,10 +33,11 @@ type Run = RunHandlers & { resolve: (result: Transcription | null) => void; reje
 
 /**
  * The Whisper model in a Web Worker: which one, whether it is on disk, loading it, and running it. One worker per
- * window, spawned on mount and again after a stop — terminating is the only way out of a run, and it takes the
- * loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
+ * window, spawned once the window transcribes with Whisper (`active`) and again after a stop — terminating is the
+ * only way out of a run, and it takes the loaded model with it, so the replacement starts loading at once instead
+ * of waiting for the next click. While the API engine transcribes, nothing is loaded and nothing is asked.
  */
-export function useWhisper(s: Strings, uiLang: UiLang) {
+export function useWhisper(s: Strings, uiLang: UiLang, active: boolean) {
   const [download, setDownload] = useState(0);
   // Which model this window works with, which ones are already on disk, and what the machine can run. `modelId`
   // is null only for the moment the adapter is being probed, before anything decides anything.
@@ -126,9 +127,7 @@ export function useWhisper(s: Strings, uiLang: UiLang) {
 
       setGpu(adapter);
       setModels(state);
-      setModelId(pick);
-      if (state[pick] === 'ready') spawn(pick);
-      else setAskModel(pick);
+      setModelId(pick); // the effect below loads it or asks about it, once Whisper is the engine
     })();
 
     const unsubscribe = window.api.onGpuGone((message) => {
@@ -143,6 +142,19 @@ export function useWhisper(s: Strings, uiLang: UiLang) {
     // Mount only: a running worker is not re-spawned because the window changed language.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The model loads, or the download is asked about, only when Whisper is the engine: on startup, or when the
+  // settings switch to it. Once spawned, the worker stays, whichever engine is chosen later.
+  useEffect(() => {
+    if (!active || modelId === null || started) return;
+    // Starting the worker, or asking first, is what this effect is for — not state derived from other state.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (models[modelId] === 'ready') spawn(modelId);
+    else setAskModel(modelId);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // The engine and the probe decide it; spawn is a new function on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, modelId]);
 
   /** Runs the loaded model over the samples. Resolves null when the run was stopped or the model went away. */
   const transcribe = (audio: Float32Array, language: Language, handlers: RunHandlers): Promise<Transcription | null> =>

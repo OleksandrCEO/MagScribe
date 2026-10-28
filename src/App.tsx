@@ -42,7 +42,7 @@ import {
 } from '@/settings';
 import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
 import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
-import type { SpeechEngine } from '@/api';
+import type { AiSettings, SpeechEngine } from '@/api';
 import { useApiSpeech } from '@/useApiSpeech';
 import { useWhisper } from '@/useWhisper';
 import type { Language } from '@/worker';
@@ -146,7 +146,8 @@ export default function App() {
     readSetting(LANG_KEY, UI_LANGS, pickUiLang(navigator.language)),
   );
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
-  const [transcriber, setTranscriber] = useState<SpeechEngine>('whisper'); // the engine the settings chose
+  // The engines and the API as main keeps them (no key); null for the moment until main answers.
+  const [engines, setEngines] = useState<AiSettings | null>(null);
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the summary engine gets
   const [language, setLanguage] = useState<Language>('uk');
   const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
@@ -190,7 +191,7 @@ export default function App() {
     chooseModel,
     allowModel,
     forgetModel,
-  } = useWhisper(s, uiLang);
+  } = useWhisper(s, uiLang, engines?.speech === 'whisper');
   const apiSpeech = useApiSpeech();
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
@@ -236,7 +237,7 @@ export default function App() {
 
   // The engine lives in main with the rest of the API settings; it can only change while the settings are open.
   useEffect(() => {
-    if (dialog === null) void window.api.getAiSettings().then((settings) => setTranscriber(settings.speech));
+    if (dialog === null) void window.api.getAiSettings().then(setEngines);
   }, [dialog]);
 
   // What the window speaks: remembered, read out by a screen reader, and passed on to main, which has its own
@@ -253,6 +254,7 @@ export default function App() {
   // The summary run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
   // window has to ask, and nothing new may start underneath it and then be overwritten by its answer.
   const busy = job !== null;
+  const viaApi = engines?.speech === 'api'; // the transcription goes to the API: no model to load or to ask about
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -417,8 +419,8 @@ export default function App() {
   /** Starts the run, or arranges for it: the model may still be loading, or not be downloaded at all yet. */
   const startOrWait = (from?: number): void => {
     pendingFrom.current = from;
-    if (transcriber === 'api' || model) {
-      void startTranscription(from, transcriber);
+    if (viaApi || model) {
+      void startTranscription(from, viaApi ? 'api' : 'whisper');
       return;
     }
     setPending(true);
@@ -549,15 +551,24 @@ export default function App() {
 
   const status = busy
     ? s.status.awake
-    : model
+    : viaApi || model
       ? transcript || audio
         ? s.status.done
-        : s.status.modelReady
+        : viaApi
+          ? s.status.api
+          : s.status.modelReady
       : modelStage === 'absent'
         ? s.status.modelAbsent
         : modelStage === 'preparing'
           ? s.status.preparing
           : s.status.downloading; // also what the few milliseconds of `checking` say
+
+  // What does the transcription and how, for the status line and the About window.
+  const engineLine = viaApi
+    ? `${engines.speechModel} · ${engines.baseUrl && new URL(engines.baseUrl).host}`
+    : model && `${model.adapter} · ${model.encoder}`;
+  // A Whisper that failed is no news while the API transcribes.
+  const shownError = viaApi ? null : modelError;
 
   // What the window is about right now: picking a file, reading what a run produced, or holding an exported track.
   const stage = audio || job?.kind === 'exporting' ? 'audio' : ran || running ? 'text' : 'pick';
@@ -661,7 +672,7 @@ export default function App() {
   );
 
   // The API engine does not need the model, so a model that failed to load does not stop it.
-  const cannotStart = !file || busy || pending || (modelStage === 'failed' && transcriber === 'whisper');
+  const cannotStart = !file || busy || pending || engines === null || (modelStage === 'failed' && !viaApi);
   const transcribeButton = (lead: boolean): ReactNode => (
     <PillButton
       lead={lead}
@@ -901,21 +912,21 @@ export default function App() {
         <div
           className={cn(
             'pointer-events-auto flex flex-col gap-0.5 pb-1.5 text-xs',
-            modelError ? 'text-destructive' : cn('text-muted-foreground', wideOnly),
+            shownError ? 'text-destructive' : cn('text-muted-foreground', wideOnly),
           )}
-          title={fallback ?? undefined}
+          title={(!viaApi && fallback) || undefined}
           aria-live="polite"
         >
-          <span>{modelError ?? status}</span>
-          {modelError ? (
+          <span>{shownError ?? status}</span>
+          {shownError ? (
             <StatusLink
               label={s.ui.retry}
               onClick={restart}
             />
-          ) : modelStage === 'absent' && modelId ? (
+          ) : !viaApi && modelStage === 'absent' && modelId ? (
             <StatusLink label={s.ui.downloadModel} onClick={() => setAskModel(modelId)} />
           ) : (
-            model && <span className="text-[11px] opacity-75">{`${model.adapter} · ${model.encoder}`}</span>
+            engineLine && <span className="text-[11px] opacity-75">{engineLine}</span>
           )}
         </div>
 
@@ -1111,8 +1122,8 @@ export default function App() {
       <AboutDialog
         open={dialog === 'about'}
         s={s}
-        model={MODELS[modelId ?? recommended].name}
-        engine={model && `${model.adapter} · ${model.encoder}`}
+        model={viaApi ? s.settings.speechEngines.api : MODELS[modelId ?? recommended].name}
+        engine={engineLine}
         onClose={() => setDialog(null)}
       />
       {/* Top right: at the bottom the toasts sat over the pill, i.e. over the buttons they are reporting on. */}
