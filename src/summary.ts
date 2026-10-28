@@ -3,6 +3,7 @@ import { app } from 'electron';
 import { aiSettings } from './aiSettings';
 import { chatRequest, readReply } from './api';
 import { cancelApi, postApi, TIMEOUT_MS } from './apiRequest';
+import { findOnPath, invocation, stopTree } from './executables';
 import { t } from './i18n';
 import { CHAPTERS_PROMPT, SUMMARY_PROMPT, type AiTask } from './prompts';
 
@@ -21,27 +22,38 @@ let child: ChildProcess | null = null;
 
 /** Drops the run the window gave up on — a summary or an API transcription. Safe to call when there is none. */
 export const cancelAi = (): void => {
-  child?.kill();
+  if (child !== null) stopTree(child);
   child = null;
   cancelApi();
 };
 
-// The arguments each CLI takes: the instruction, and the transcript on stdin. codex runs in its read-only sandbox,
-// keeps no session on disk and does not insist on a git repository, which the temp folder is not.
+// Constant arguments only, and the instruction travels on stdin ahead of the transcript: npm installs both CLIs
+// on Windows as a .cmd, which takes nothing from the outside on its command line (see `invocation`).
+// codex runs in its read-only sandbox, keeps no session on disk and does not insist on a git repository, which
+// the temp folder is not; its `-` reads the prompt from stdin.
 type Cli = 'claude' | 'codex';
-const CLI_ARGS: Record<Cli, (prompt: string) => string[]> = {
-  claude: (prompt) => ['-p', prompt, '--disallowed-tools', FENCED_OFF],
-  codex: (prompt) => ['exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '--', prompt],
+const CLI_ARGS: Record<Cli, string[]> = {
+  claude: ['-p', '--disallowed-tools', FENCED_OFF],
+  codex: ['exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '-'],
 };
 
 /** Runs the `claude` or `codex` CLI over a transcript. Anything that goes wrong comes back as a readable message. */
 const runCli = (cli: Cli, prompt: string, input: string): Promise<string> =>
   new Promise((resolve, reject) => {
+    const found = findOnPath(cli);
+    if (found === null) {
+      reject(new Error(t().error.cliMissing[cli]));
+      return;
+    }
+    const { file, args, verbatim } = invocation(found, CLI_ARGS[cli]);
+    // Our own timer rather than execFile's: that one kills only the direct child, which on Windows is cmd.exe.
+    let timedOut = false;
     const run = execFile(
-      cli,
-      CLI_ARGS[cli](prompt),
-      { cwd: app.getPath('temp'), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+      file,
+      args,
+      { cwd: app.getPath('temp'), maxBuffer: 8 * 1024 * 1024, windowsVerbatimArguments: verbatim },
       (error, stdout, stderr) => {
+        clearTimeout(timer);
         child = null;
         if (!error) {
           resolve(stdout.trim());
@@ -52,21 +64,25 @@ const runCli = (cli: Cli, prompt: string, input: string): Promise<string> =>
           reject(new Error(t().error.cliMissing[cli]));
           return;
         }
-        // Node kills the child on an oversized stdout too, and `killed` alone would blame the timeout for it.
+        // Node kills the child on an oversized stdout too, so this is checked before the timeout.
         if (code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
           reject(new Error(t().error.replyTooBig));
           return;
         }
-        if (error.killed) {
+        if (timedOut) {
           reject(new Error(t().error.cliTimeout(cli, TIMEOUT_MS / 1000)));
           return;
         }
         reject(new Error(stderr.trim() || error.message));
       },
     );
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stopTree(run);
+    }, TIMEOUT_MS);
 
     child = run;
-    run.stdin?.end(input);
+    run.stdin?.end(`${prompt}\n\n${input}`);
   });
 
 /** Sends the transcript to the OpenAI-compatible API from the settings. The key never leaves main. */

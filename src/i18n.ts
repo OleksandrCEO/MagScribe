@@ -299,6 +299,13 @@ const uk = {
     transcribing: (percent: number): string => `Розшифровую: ${percent}%`,
     merging: 'Зшиваю фрагменти…',
   },
+
+  /** The macOS app menu; elsewhere the app has no menu bar. */
+  menu: {
+    installCli: 'Встановити команду magscribe',
+    installed: 'Команда magscribe тепер є в /usr/local/bin. Відкрий новий термінал і спробуй magscribe --help.',
+    installFailed: (reason: string): string => `Не вдалося встановити команду magscribe: ${reason}`,
+  },
 };
 
 const en: typeof uk = {
@@ -559,6 +566,12 @@ const en: typeof uk = {
     reading: (percent: number): string => `Reading audio: ${percent}%`,
     transcribing: (percent: number): string => `Transcribing: ${percent}%`,
     merging: 'Stitching the chunks…',
+  },
+
+  menu: {
+    installCli: 'Install the magscribe command',
+    installed: 'The magscribe command is now in /usr/local/bin. Open a new terminal and try magscribe --help.',
+    installFailed: (reason: string): string => `Could not install the magscribe command: ${reason}`,
   },
 };
 

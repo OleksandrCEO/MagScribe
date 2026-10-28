@@ -284,9 +284,9 @@ support library is itself covered by the above license.
 
 ## Apache License 2.0
 
-Covers `@huggingface/transformers` and `@huggingface/tokenizers`, `class-variance-authority`,
-`electron-squirrel-startup`, `flatbuffers`, `long`, `detect-libc` and `sharp`. None of these ships a `NOTICE`
-file, so there is no notice text to propagate beyond the licence itself.
+Covers `@huggingface/transformers` and `@huggingface/tokenizers`, `class-variance-authority`, `flatbuffers`,
+`long`, `detect-libc` and `sharp`. None of these ships a `NOTICE` file, so there is no notice text to propagate
+beyond the licence itself.
 
 ```
 
@@ -552,7 +552,6 @@ inlines. Regenerate after a dependency change.
 | `detect-libc` | 2.1.2 | Apache-2.0 |
 | `detect-node` | 2.1.0 | MIT |
 | `devlop` | 1.1.0 | MIT |
-| `electron-squirrel-startup` | 1.0.1 | Apache-2.0 |
 | `es-define-property` | 1.0.1 | MIT |
 | `es-errors` | 1.3.0 | MIT |
 | `es6-error` | 4.1.1 | MIT |

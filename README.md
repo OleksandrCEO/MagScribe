@@ -5,7 +5,8 @@
 > **In English.** MagScribe is a desktop app that transcribes video and audio with Whisper large-v3-turbo
 > (WebGPU, wasm fallback). It produces plain text, SubRip subtitles and YouTube-style chapter timecodes. The
 > interface speaks Ukrainian and English — it opens in the language of the operating system, and the settings
-> window switches it. Linux x86_64.
+> window switches it. Linux x86_64; Windows x64 and macOS (Apple Silicon) builds are made but not yet tried on
+> a real machine.
 
 ## Що воно робить
 
@@ -26,9 +27,13 @@
 
 ## Вимоги
 
-- **Linux x86_64.** Складання під Windows і macOS налаштоване, але ніколи не перевірялося.
-- **ffmpeg** у `PATH` — застосунок не несе власного бінарника (чому — нижче). У дистрибутивах він є в пакетах:
-  `sudo apt install ffmpeg`, `sudo dnf install ffmpeg`, `nix profile add nixpkgs#ffmpeg`.
+- **Linux x86_64.** Збірки під Windows x64 і macOS (Apple Silicon) складаються, але на живій машині ще не
+  перевірялися. Вони не підписані: Windows SmartScreen попередить перед першим запуском, а завантажений на macOS
+  застосунок відкриється лише після `xattr -cr /Applications/magscribe.app`.
+- **ffmpeg** у `PATH` — застосунок не несе власного бінарника (чому — нижче). Поставити його:
+  `sudo apt install ffmpeg`, `sudo dnf install ffmpeg`, `nix profile add nixpkgs#ffmpeg`, `winget install ffmpeg`,
+  `brew install ffmpeg`. На macOS застосунок бере `PATH` із login shell користувача, тож ffmpeg із Homebrew і
+  CLI для конспекту знаходяться, навіть коли MagScribe відкрито з Finder.
   Без нього коротке відео чи аудіо (до 200 МБ) усе одно розшифрується — файл прочитає декодер самого браузера.
   Перевірено, що так читаються MP4, MOV, MKV, MP3, FLAC; AVI і WMV — ні. Збереження аудіодоріжки в OGG без
   ffmpeg не працює взагалі: кодувати Opus нічим.
@@ -54,7 +59,8 @@
 файл і помітно кращий результат, ніж 4 біти), а на відеокарті — у q4, бо для int8 у WebGPU-бекенді немає ядер
 і прогін сповзає на CPU.
 
-Кеш лежить у `~/.config/magscribe/Service Worker/CacheStorage/`. Кнопка «Видалити» в налаштуваннях прибирає
+Кеш лежить у `~/.config/magscribe/Service Worker/CacheStorage/` (на macOS тека `magscribe` — у
+`~/Library/Application Support/`, на Windows — у `%APPDATA%`). Кнопка «Видалити» в налаштуваннях прибирає
 звідти одну модель; усе разом зносить тека:
 
 ```bash
@@ -88,9 +94,13 @@ magscribe --transcribe video.mp4 --format srt > video.srt
 - Поки відкрите вікно MagScribe, команда відмовляється з помилкою: обидва режими ділять кеш і налаштування.
 - Потрібна графічна сесія (Wayland або X), як і будь-якому Electron-застосунку; вікно при цьому не з'являється.
 - Конспекту й розділів тут немає навмисно: той, хто викликав команду, зробить їх сам із `timed`-виводу.
-- У `PATH` команду `magscribe` зараз кладе лише пакет для NixOS (`nix/magscribe.nix`). **Для Windows, macOS і
-  deb/rpm це ще треба зробити**, коли дійде до збірки під кожну з них — інакше доведеться викликати бінарник за
-  повним шляхом.
+- Звідки береться команда `magscribe`:
+  - NixOS — пакет із `nix/magscribe.nix` кладе її в `PATH`;
+  - deb / rpm — пакет створює `/usr/bin/magscribe`;
+  - Windows — інсталятор кладе `magscribe.cmd` у `%LOCALAPPDATA%\magscribe\bin` і додає цю теку в `PATH`
+    користувача; видалення застосунку прибирає її звідти. Термінал, відкритий до встановлення, її ще не бачить;
+  - macOS — меню застосунку → «Встановити команду magscribe»: macOS спитає пароль і посилання ляже в
+    `/usr/local/bin`.
 
 ## Збірка з вихідників
 
@@ -109,6 +119,10 @@ npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result && nix p
 ```
 
 Наступна збірка — це інший store path, тому перед повторним встановленням зроби `nix profile remove magscribe`.
+
+Windows і macOS збираються на своїх ОС: `npm run make` кладе інсталятор Squirrel (Windows) або ZIP із `.app`
+(macOS) в `out/make`. Без власної машини — workflow **Build** у GitHub Actions (запускається вручну, `gh workflow
+run build.yml`) робить обидві й віддає їх як artifacts.
 
 Перевірки:
 

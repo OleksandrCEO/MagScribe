@@ -1,0 +1,27 @@
+# Installable builds for Windows and macOS, each on its own runner: Squirrel wants Windows and the .app wants a
+# Mac. Linux is packaged locally and wrapped by Nix (see CLAUDE.md). Started by hand; nothing is signed yet.
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  make:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest] # macos-latest is Apple Silicon
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run make
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magscribe-${{ runner.os }}
+          path: out/make/**
+          if-no-files-found: error

@@ -14,7 +14,13 @@ const config: ForgeConfig = {
     // the file lands next to the binary as <app>/resources/THIRD-PARTY-LICENSES.md. ffmpeg is deliberately
     // not here: the app uses the system's own copy — see src/audio.ts.
     // icon.png is read at runtime for the window icon: the asar keeps only the bundle (see src/main.ts).
-    extraResource: ['./THIRD-PARTY-LICENSES.md', './assets/icon.png'],
+    // bin/magscribe is the macOS command line, which the app menu links into /usr/local/bin; Windows writes its
+    // own on install (src/squirrel.ts), deb/rpm link /usr/bin/magscribe, Nix wraps the binary.
+    extraResource: [
+      './THIRD-PARTY-LICENSES.md',
+      './assets/icon.png',
+      ...(process.platform === 'darwin' ? ['./assets/bin'] : []),
+    ],
     icon: './assets/icon', // packager appends .ico/.icns per platform
   },
   rebuildConfig: {},

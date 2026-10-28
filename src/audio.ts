@@ -7,37 +7,22 @@ import type { ExportedAudio } from './preload';
 import { t } from './i18n';
 import { BYTES_PER_SECOND, fitsInMemory, SAMPLE_RATE } from './pcm';
 import { parseClock } from './subtitles';
+import { findOnPath } from './executables';
 
-const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-
-/**
- * The system's ffmpeg, looked up on PATH once at startup.
+/*
+ * The system's ffmpeg, looked up on PATH.
  *
  * We deliberately do not ship a binary: the prebuilt static builds are GPLv3 (their x264/x265 encoders force
  * it), and conveying one would oblige us to publish matching sources for ffmpeg and every library linked into
  * it — for capability this app never uses. It only decodes to raw PCM and encodes Opus. The distro's own copy
  * is the user's own copy, so nothing is conveyed and nothing is owed.
  */
-const findFfmpeg = (): string | null => {
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (dir === '') continue;
-    const candidate = path.join(dir, binaryName);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {
-      // not here, keep looking
-    }
-  }
-  return null;
-};
-
 let ffmpegPath: string | null | undefined; // undefined: PATH not searched yet
 
 /** Absolute path to ffmpeg, or null when the system has none. Re-checked after a failed lookup, so the user
  *  can install ffmpeg and carry on without restarting the app. */
 export const ffmpegBinary = (): string | null => {
-  if (ffmpegPath === undefined || ffmpegPath === null) ffmpegPath = findFfmpeg();
+  if (ffmpegPath === undefined || ffmpegPath === null) ffmpegPath = findOnPath('ffmpeg');
   return ffmpegPath;
 };
 

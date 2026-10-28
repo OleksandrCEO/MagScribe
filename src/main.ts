@@ -14,11 +14,10 @@ import {
   screen,
   shell,
 } from 'electron';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import started from 'electron-squirrel-startup';
 import type { ExportedAudio, SelectedFile } from './preload';
 import { parseCli, renderOutput, USAGE, type CliJob } from './cli';
 import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
@@ -29,6 +28,8 @@ import { AI_TASKS, cancelAi, runApi } from './summary';
 import { aiSettings, saveAiSettings } from './aiSettings';
 import { parseUpdate, rolesInUse, type AiSettings, type ApiCheck, type ApiRole } from './api';
 import { transcribeApi } from './speech';
+import { loginShellPath } from './executables';
+import { handleSquirrel } from './squirrel';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -65,10 +66,11 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (started) {
-  app.quit();
-}
+// Installing, updating or removing on Windows: shortcuts and the `magscribe` command, then quit (see squirrel.ts).
+const squirrel = handleSquirrel();
+
+// Before anything looks a program up: from Finder or the Dock a macOS app gets launchd's bare PATH.
+if (process.platform === 'darwin') process.env.PATH = loginShellPath() ?? process.env.PATH;
 
 const GPU_LOG_CAP = 64 * 1024; // past this the GPU crash log starts over
 
@@ -501,7 +503,9 @@ ipcMain.on('work:working', (_event, value: unknown) => setWorking(value === true
 
 // The window's own choice, which may differ from the system locale main started with.
 ipcMain.on('lang:set', (_event, lang: unknown) => {
-  if (UI_LANGS.includes(lang as UiLang)) setUiLang(lang as UiLang);
+  if (!UI_LANGS.includes(lang as UiLang)) return;
+  setUiLang(lang as UiLang);
+  setMenu();
 });
 
 ipcMain.on('notify', (_event, title: unknown, body: unknown) => {
@@ -560,13 +564,52 @@ ipcMain.handle('ai:check', async (): Promise<ApiCheck> => {
   return results;
 });
 
+/**
+ * macOS: links /usr/local/bin/magscribe to the script in the bundle (resources/bin, see forge.config.ts), the
+ * way editors offer their command. The folder belongs to root, so macOS asks for the password; the path rides
+ * in argv and `quoted form of` hands it to the shell, so no folder name is ever parsed as code.
+ */
+const installCommand = (): void => {
+  const script = [
+    'on run argv',
+    'do shell script "mkdir -p /usr/local/bin && ln -sf " & quoted form of (item 1 of argv) & ' +
+      '" /usr/local/bin/magscribe" with administrator privileges',
+    'end run',
+  ];
+  const target = path.join(process.resourcesPath, 'bin', 'magscribe');
+  execFile('/usr/bin/osascript', [...script.flatMap((line) => ['-e', line]), target], (error, _stdout, stderr) => {
+    if (error && stderr.includes('(-128)')) return; // the password prompt was cancelled
+    const message = error ? t().menu.installFailed(stderr.trim() || error.message) : t().menu.installed;
+    void dialog.showMessageBox({ type: error ? 'error' : 'info', message });
+  });
+};
+
+/** No menu bar anywhere but macOS, where the app menu and Edit carry Cmd+Q and Cmd+C/V for the text fields. */
+const setMenu = (): void => {
+  if (process.platform !== 'darwin') return Menu.setApplicationMenu(null);
+  const appMenu: Electron.MenuItemConstructorOptions[] = [
+    // A dev run has no bundle to link to.
+    { label: t().menu.installCli, enabled: app.isPackaged, click: installCommand },
+    { type: 'separator' },
+    { role: 'hide' },
+    { role: 'hideOthers' },
+    { role: 'unhide' },
+    { type: 'separator' },
+    { role: 'quit' },
+  ];
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([{ role: 'appMenu', submenu: appMenu }, { role: 'editMenu' }, { role: 'windowMenu' }]),
+  );
+};
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
-  Menu.setApplicationMenu(null);
+  if (squirrel) return;
   // Until the window reports what it is set to, main speaks the system's language.
   setUiLang(pickUiLang(app.getLocale()));
+  setMenu();
   // The app is dark unless told otherwise, and this is what the first frame is painted with: the renderer
   // re-asserts the saved choice a moment later, but by then the window must not have flashed white.
   nativeTheme.themeSource = 'dark';
@@ -593,6 +636,7 @@ app.on('ready', () => {
   } catch {
     return exitWith(2, process.stderr, `${t().cli.notAFile(file)}\n`);
   }
+  app.dock?.hide(); // a command-line run is not an app the Dock should bounce for
   runCli({ ...cli, file });
 });
 

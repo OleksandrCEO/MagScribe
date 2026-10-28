@@ -1,0 +1,6 @@
+#!/bin/sh
+# The command line on macOS: /usr/local/bin/magscribe links here (the app menu sets that up), and this script
+# sits in <app>/Contents/Resources/bin, two folders from the binary. Following the link rather than hardcoding
+# the app's path keeps the command working wherever the app was dragged to before the link was made.
+self=$(readlink "$0" || echo "$0")
+exec "$(dirname "$self")/../../MacOS/magscribe" "$@"
