@@ -124,7 +124,7 @@ pkgs.stdenv.mkDerivation {
   ];
 
   meta = {
-    description = "Converts video/audio files and transcribes them on your own machine";
+    description = "Converts video/audio files and transcribes them";
     mainProgram = "magscribe";
     platforms = [ "x86_64-linux" ];
   };

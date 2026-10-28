@@ -1,6 +1,6 @@
 # MagScribe
 
-Desktop app: converts video/audio files and transcribes them. Transcription runs on the user's machine; the summary and the chapters shell out to the local `claude` CLI, which does reach Anthropic. Cloud engines behind a user's own key are the direction, not a promise that nothing ever leaves — `docs/concept.md` holds that concept, and UI copy must stay honest about which half is local.
+Desktop app: converts video/audio files and transcribes them. The transcription and the summary are swappable engines — `docs/concept.md` holds the idea, `docs/engines.md` the plan. **Copy is neutral**: UI strings, README, package and desktop descriptions say what the app does (transcription, subtitles, chapters) and never where it runs — no «local», «on your machine», «what leaves your machine», no privacy tables. The app is universal, not local; such a promise would have to be rewritten with every new engine.
 
 **Stack**: Electron 44 / electron-forge 7 (vite plugin) / Vite 5 / React 19 / TypeScript 5 / Tailwind CSS v4 / shadcn/ui (Base UI variant) / npm
 
@@ -20,7 +20,7 @@ Desktop app: converts video/audio files and transcribes them. Transcription runs
   driver without creating a device, so asking twice is free.
 - `src/i18n.ts` — every line the app shows, in Ukrainian and English. Two dictionaries plus `const en: typeof uk`, so a forgotten key is a type error; values that take a number or a name are functions, and `*emphasis*` / `` `code` `` inside a line is rendered by `rich()` in `settings.tsx`. Keep it free of node and React imports — main, the worker and the renderer all import it. The renderer reads `STRINGS[uiLang]`; main and the worker read `t()` after a `setUiLang()` (over `lang:set`, and with the worker's `load` message).
 - `src/settings.tsx` — the shared modal shell (a native `<dialog>`), the windows built on it (settings with the language picker, About, the confirmations), `rich()` for the markup inside a translated line, and the localStorage helpers behind the theme, the language and the prompts.
-- `docs/concept.md` — where the product is going: swappable local/cloud engines for both the transcription and the summary, and why the UI copy may not claim more than that.
+- `docs/concept.md` — where the product is going: swappable engines for both the transcription and the summary. `docs/engines.md` — the phased plan for the API engines and what each phase has done.
 - `src/lib/utils.ts` — re-exports `cn` (from the `cn` package). Use it for class merging, never write a local classnames helper.
 - `src/index.css` — Tailwind entry + shadcn theme tokens.
 - Three separate Vite configs: `vite.main.config.ts`, `vite.preload.config.ts`, `vite.renderer.config.mts`. Targets are wired in `forge.config.ts`.

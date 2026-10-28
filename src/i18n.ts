@@ -160,9 +160,8 @@ const uk = {
     cancel: 'Не зараз',
     confirm: (size: string): string => `Завантажити ${size}`,
     body: (name: string, gpu: boolean): string[] => [
-      'MagScribe розшифровує на цій машині, тож їй потрібна модель. Вона завантажується один раз із ' +
-        'huggingface.co і лишається в кеші застосунку — змінити чи видалити її можна в налаштуваннях. Це ' +
-        'єдине, що застосунок завантажує сам.',
+      'Для розшифровки потрібна модель. Вона завантажується один раз із huggingface.co і лишається в кеші ' +
+        'застосунку — змінити чи видалити її можна в налаштуваннях.',
       gpu
         ? `Рекомендована *${name}*: тут є відеокарта, яка її потягне.`
         : `Рекомендована *${name}* — так, на процесорі вона повільна. Менша модель швидша, але помітно ` +
@@ -209,9 +208,7 @@ const uk = {
   /** `version` is the build, `model` the one in use, `engine` the adapter line (null while it is loading). */
   about: (version: string, model: string, engine: string | null): string[] => [
     `*MagScribe ${version}* — транскрибація відео й аудіо: текст, субтитри .srt і таймкоди розділів.`,
-    `Зараз розшифровує ${model} на цій машині${engine ? ` *(${engine})*` : ''}, а конспект і таймкоди пише ` +
-      'команда `claude` — тобто транскрипт для них іде в Anthropic.',
-    'Вибір рушія для обох кроків — локального чи хмарного — зʼявиться в налаштуваннях.',
+    `Модель розпізнавання: ${model}${engine ? ` *(${engine})*` : ''}.`,
     'Моделі — *openai/whisper* (MIT) у ONNX-конверсії onnx-community: large-v3-turbo для відеокарти і small ' +
       'для процесора; звук читає системний `ffmpeg`. Умови сторонніх компонентів — у файлі ' +
       '*THIRD-PARTY-LICENSES.md* поруч із застосунком. Сам MagScribe — під MIT.',
@@ -382,9 +379,8 @@ const en: typeof uk = {
     cancel: 'Not now',
     confirm: (size: string): string => `Download ${size}`,
     body: (name: string, gpu: boolean): string[] => [
-      'MagScribe transcribes on this machine, so it needs a model. It is downloaded once from huggingface.co ' +
-        'and stays in the app cache — the settings window changes it or deletes it again. This is the only ' +
-        'thing the app downloads by itself.',
+      'Transcription needs a model. It is downloaded once from huggingface.co and stays in the app cache — ' +
+        'the settings window changes it or deletes it again.',
       gpu
         ? `The recommended one is *${name}*: there is a graphics card here to carry it.`
         : `The recommended one is *${name}* — slow on a processor, yes. The smaller model is faster, but it ` +
@@ -428,10 +424,7 @@ const en: typeof uk = {
 
   about: (version: string, model: string, engine: string | null): string[] => [
     `*MagScribe ${version}* — transcription of video and audio: text, .srt subtitles and chapter timecodes.`,
-    `Right now ${model} does the transcription on this machine${engine ? ` *(${engine})*` : ''}, while the ` +
-      'summary and the chapters are written by the `claude` command — so the transcript goes to Anthropic for ' +
-      'those two.',
-    'A choice of engine for both steps — local or cloud — is coming to the settings.',
+    `Speech model: ${model}${engine ? ` *(${engine})*` : ''}.`,
     'The models are *openai/whisper* (MIT) in the ONNX conversion by onnx-community: large-v3-turbo for the ' +
       'graphics card and small for the processor; the sound is read by the system `ffmpeg`. The terms of the ' +
       'third-party components are in *THIRD-PARTY-LICENSES.md* next to the app. MagScribe itself is under MIT.',

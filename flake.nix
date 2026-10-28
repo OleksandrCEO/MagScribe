@@ -1,5 +1,5 @@
 {
-  description = "MagScribe — local video converter and transcriber";
+  description = "MagScribe — video converter and transcriber";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
