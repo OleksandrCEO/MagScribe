@@ -201,11 +201,16 @@ const uk = {
       'Інструкції, які отримує модель. Можна замінити на власні, або підкоригувати за бажанням. Порожнє поле ' +
       'підставить промпт за замовчуванням.',
     reset: 'Скинути',
+    speechEngine: 'Розшифровка',
+    speechEngines: { whisper: 'Модель розпізнавання', api: 'API' },
     aiEngine: 'Конспект і таймкоди',
     engines: { claude: 'Команда claude', api: 'API' },
-    apiHint: 'Будь-який OpenAI-сумісний API: OpenAI, OpenRouter, Groq, ollama, LM Studio. Адреса — до `/v1` включно.',
+    apiHint:
+      'Будь-який OpenAI-сумісний API: OpenAI, OpenRouter, Groq, ollama, LM Studio. Адреса — до `/v1` включно. '
+      + 'Для розшифровки потрібна модель із таймкодами: `whisper-1` в OpenAI, `whisper-large-v3` у Groq.',
     baseUrl: 'Адреса',
-    apiModel: 'Модель',
+    speechModel: 'Модель розшифровки',
+    apiModel: 'Модель конспекту',
     apiKey: 'Ключ',
     keySaved: 'збережено; новий замінить його',
     keyNone: 'не потрібен для власного сервера',
@@ -249,6 +254,9 @@ const uk = {
     apiFailed: (status: number, detail: string): string => `Сервер відповів ${status}: ${detail}`,
     apiEmpty: 'Сервер відповів без тексту',
     apiTimeout: (seconds: number): string => `Сервер не відповів за ${seconds} секунд`,
+    noTimestamps: (model: string): string =>
+      `Модель ${model} повернула текст без таймкодів, а без них не буде ні субтитрів, ні розділів. Обери модель, `
+      + 'що вміє verbose_json, — наприклад, whisper-1 чи whisper-large-v3.',
     adapterNull: 'requestAdapter() повернув null',
     unknownAdapter: 'невідомий адаптер',
     softwareAdapter: (label: string): string => `програмний адаптер «${label}» замість відеокарти`,
@@ -441,11 +449,16 @@ const en: typeof uk = {
       'The instructions the model gets. Replace them with your own, or tweak them as you like. An empty field ' +
       'falls back to the built-in prompt.',
     reset: 'Reset',
+    speechEngine: 'Transcription',
+    speechEngines: { whisper: 'Speech model', api: 'API' },
     aiEngine: 'Summary and chapters',
     engines: { claude: 'claude command', api: 'API' },
-    apiHint: 'Any OpenAI-compatible API: OpenAI, OpenRouter, Groq, ollama, LM Studio. The address goes up to `/v1`.',
+    apiHint:
+      'Any OpenAI-compatible API: OpenAI, OpenRouter, Groq, ollama, LM Studio. The address goes up to `/v1`. '
+      + 'Transcription needs a model with timestamps: `whisper-1` at OpenAI, `whisper-large-v3` at Groq.',
     baseUrl: 'Address',
-    apiModel: 'Model',
+    speechModel: 'Transcription model',
+    apiModel: 'Summary model',
     apiKey: 'Key',
     keySaved: 'saved; a new one replaces it',
     keyNone: 'not needed for your own server',
@@ -486,6 +499,9 @@ const en: typeof uk = {
     apiFailed: (status: number, detail: string): string => `The server answered ${status}: ${detail}`,
     apiEmpty: 'The server answered with no text',
     apiTimeout: (seconds: number): string => `The server did not answer within ${seconds} seconds`,
+    noTimestamps: (model: string): string =>
+      `The model ${model} returned text without timestamps, and without them there are no subtitles and no `
+      + 'chapters. Pick a model that does verbose_json, such as whisper-1 or whisper-large-v3.',
     adapterNull: 'requestAdapter() returned null',
     unknownAdapter: 'unknown adapter',
     softwareAdapter: (label: string): string => `software adapter “${label}” instead of a graphics card`,

@@ -42,6 +42,8 @@ import {
 } from '@/settings';
 import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
 import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
+import type { SpeechEngine } from '@/api';
+import { useApiSpeech } from '@/useApiSpeech';
 import { useWhisper } from '@/useWhisper';
 import type { Language } from '@/worker';
 import { cn } from 'cn';
@@ -144,6 +146,7 @@ export default function App() {
     readSetting(LANG_KEY, UI_LANGS, pickUiLang(navigator.language)),
   );
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
+  const [transcriber, setTranscriber] = useState<SpeechEngine>('whisper'); // the engine the settings chose
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the summary engine gets
   const [language, setLanguage] = useState<Language>('uk');
   const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
@@ -188,6 +191,7 @@ export default function App() {
     allowModel,
     forgetModel,
   } = useWhisper(s, uiLang);
+  const apiSpeech = useApiSpeech();
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
   const speech: { value: Language; label: string; title: string }[] = [
@@ -201,6 +205,7 @@ export default function App() {
   const startedAt = useRef(0);
   const stopped = useRef(false); // a cancelled ffmpeg rejects like a broken one; this tells the two apart
   const aiStopped = useRef(false); // same for a stopped summary: its rejection is not a failure to report
+  const speechEngine = useRef<SpeechEngine>('whisper'); // which engine the current transcription runs on
   const covered = useRef(0); // seconds of audio the text already reaches, counted from the start of the file
   const pendingFrom = useRef<number | undefined>(undefined); // what the click asked for while the model loaded
   const painted = useRef(0); // when the streaming text was last written into the panel, see PAINT_EVERY_MS
@@ -228,6 +233,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => writePrompts(prompts), [prompts]);
+
+  // The engine lives in main with the rest of the API settings; it can only change while the settings are open.
+  useEffect(() => {
+    if (dialog === null) void window.api.getAiSettings().then((settings) => setTranscriber(settings.speech));
+  }, [dialog]);
 
   // What the window speaks: remembered, read out by a screen reader, and passed on to main, which has its own
   // strings for the open dialog and for the errors it reports.
@@ -290,7 +300,10 @@ export default function App() {
   };
 
   const failWith = (error: unknown): void => {
-    toast.error(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    // A rejection from main arrives wrapped in Electron's «Error invoking remote method '…': Error: »; the words
+    // after it are already written for the person.
+    toast.error(message.replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, ''));
   };
 
   /** Stops whatever is running and keeps whatever it has already produced. */
@@ -305,7 +318,10 @@ export default function App() {
     }
     stopped.current = true;
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
-    restart(); // the run in flight resolves with nothing, and a fresh worker loads the model again
+    // Either way the run in flight resolves with nothing. The worker is the only way out of a Whisper run, so a
+    // fresh one loads the model again; the API run just drops its request.
+    if (speechEngine.current === 'api') apiSpeech.stop();
+    else restart();
 
     // Where the text got to: the run can pick up there instead of starting the file over.
     const reached = covered.current;
@@ -331,8 +347,9 @@ export default function App() {
     return from ? samples.subarray(Math.floor(from * SAMPLE_RATE)) : samples;
   };
 
-  const startTranscription = async (from?: number): Promise<void> => {
+  const startTranscription = async (from?: number, engine: SpeechEngine = 'whisper'): Promise<void> => {
     if (!file) return;
+    speechEngine.current = engine;
 
     const resuming = from !== undefined && from > 0;
     clearResults(resuming);
@@ -361,7 +378,7 @@ export default function App() {
 
     setJob({ kind: 'transcribing', percent: 0, merging: false });
     try {
-      const result = await transcribe(samples, language, {
+      const result = await (engine === 'api' ? apiSpeech.transcribe : transcribe)(samples, language, {
         onProgress: (percent, reached) => {
           setJob({ kind: 'transcribing', percent, merging: false });
           covered.current = offset + reached;
@@ -400,8 +417,8 @@ export default function App() {
   /** Starts the run, or arranges for it: the model may still be loading, or not be downloaded at all yet. */
   const startOrWait = (from?: number): void => {
     pendingFrom.current = from;
-    if (model) {
-      void startTranscription(from);
+    if (transcriber === 'api' || model) {
+      void startTranscription(from, transcriber);
       return;
     }
     setPending(true);
@@ -643,13 +660,15 @@ export default function App() {
     />
   );
 
+  // The API engine does not need the model, so a model that failed to load does not stop it.
+  const cannotStart = !file || busy || pending || (modelStage === 'failed' && transcriber === 'whisper');
   const transcribeButton = (lead: boolean): ReactNode => (
     <PillButton
       lead={lead}
       icon={<AudioLinesIcon />}
       label={s.pill.transcribe}
       wide={busy && stage === 'text' ? s.pill.transcribing : pending ? s.pill.waitingForModel : undefined}
-      disabled={!file || busy || pending || modelStage === 'failed'}
+      disabled={cannotStart}
       onClick={() => startOrWait()}
     />
   );
@@ -931,7 +950,7 @@ export default function App() {
                 <PillButton
                   icon={<PlayIcon />}
                   label={s.pill.resumeFrom(timecode(resumeAt))}
-                  disabled={!file || busy || pending || modelStage === 'failed'}
+                  disabled={cannotStart}
                   onClick={() => startOrWait(resumeAt)}
                 />
               )}

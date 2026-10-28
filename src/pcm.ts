@@ -59,3 +59,62 @@ export const decodeInBrowser = async (bytes: Uint8Array): Promise<Float32Array> 
   // Copied out: the view belongs to an AudioBuffer we are about to drop, and the worker transfers what it gets.
   return new Float32Array((await offline.startRendering()).getChannelData(0));
 };
+
+/**
+ * How long one request to a transcription API may be. Ten minutes of WAV is ~19 MB, under the 25 MB OpenAI and
+ * Groq take per file, and the same piece as Opus is ~2 MB.
+ */
+export const API_CHUNK_S = 600;
+const SEARCH_S = 30; // how far back from the limit a cut looks for a pause
+const FRAME = SAMPLE_RATE / 10; // the pause is found in tenths of a second
+
+/**
+ * Where to cut a recording into pieces of at most `maxSeconds`: each cut lands in the quietest tenth of a second
+ * among the last `SEARCH_S` before the limit, so no word is split between two requests. Returns [start, end)
+ * sample pairs that cover the whole recording in order.
+ */
+export const splitAtSilence = (samples: Float32Array, maxSeconds = API_CHUNK_S): [number, number][] => {
+  const max = Math.floor(maxSeconds * SAMPLE_RATE);
+  const pieces: [number, number][] = [];
+  let start = 0;
+  while (samples.length - start > max) {
+    let cut = start + max;
+    let quietest = Infinity;
+    const earliest = Math.max(start + 1, start + max - SEARCH_S * SAMPLE_RATE);
+    for (let frame = start + max - FRAME; frame >= earliest; frame -= FRAME) {
+      let energy = 0;
+      for (let i = frame; i < frame + FRAME; i++) energy += samples[i] * samples[i];
+      if (energy < quietest) {
+        quietest = energy;
+        cut = frame + FRAME / 2; // the middle of the pause, not its edge
+      }
+    }
+    pieces.push([start, cut]);
+    start = cut;
+  }
+  pieces.push([start, samples.length]);
+  return pieces;
+};
+
+/** 16-bit PCM WAV of the samples: what every transcription server reads, with or without ffmpeg behind it. */
+export const toWav = (samples: Float32Array): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string): void => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, bytes.length - 8, true);
+  ascii(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, SAMPLE_RATE, true);
+  view.setUint32(28, SAMPLE_RATE * 2, true); // bytes per second
+  view.setUint16(32, 2, true); // bytes per frame
+  view.setUint16(34, 16, true); // bits per sample
+  ascii(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, i) => view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true));
+  return bytes;
+};

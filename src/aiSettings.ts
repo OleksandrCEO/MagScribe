@@ -1,16 +1,16 @@
 /**
- * Which engine writes the summary and the chapters, and where the API one lives. Kept by main in userData rather
- * than in the renderer's localStorage, because the key is in here: it is encrypted with safeStorage and never
- * sent back to the window, which only learns whether there is one.
+ * Which engines transcribe and write the summary and the chapters, and where the API lives. Kept by main in
+ * userData rather than in the renderer's localStorage, because the key is in here: it is encrypted with safeStorage
+ * and never sent back to the window, which only learns whether there is one.
  */
 import { app, safeStorage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { AI_ENGINES, parseBaseUrl, type AiEngine, type AiSettings, type AiSettingsUpdate } from './api';
+import { AI_ENGINES, parseBaseUrl, SPEECH_ENGINES, type AiSettings, type AiSettingsUpdate } from './api';
 import { t } from './i18n';
 
 // `key` is the safeStorage ciphertext in base64, or null.
-type Stored = { engine: AiEngine; baseUrl: string; model: string; key: string | null };
+type Stored = Omit<AiSettings, 'hasKey'> & { key: string | null };
 
 const settingsFile = (): string => path.join(app.getPath('userData'), 'engines.json');
 
@@ -20,12 +20,14 @@ const readStored = (): Stored => {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8')) as Partial<Record<keyof Stored, unknown>>;
     return {
       engine: AI_ENGINES.find((value) => value === saved.engine) ?? 'claude',
+      speech: SPEECH_ENGINES.find((value) => value === saved.speech) ?? 'whisper',
       baseUrl: typeof saved.baseUrl === 'string' ? (parseBaseUrl(saved.baseUrl) ?? '') : '',
       model: typeof saved.model === 'string' ? saved.model : '',
+      speechModel: typeof saved.speechModel === 'string' ? saved.speechModel : '',
       key: typeof saved.key === 'string' ? saved.key : null,
     };
   } catch {
-    return { engine: 'claude', baseUrl: '', model: '', key: null };
+    return { engine: 'claude', speech: 'whisper', baseUrl: '', model: '', speechModel: '', key: null };
   }
 };
 
@@ -64,7 +66,8 @@ export const saveAiSettings = (update: AiSettingsUpdate): AiSettings => {
     key = safeStorage.encryptString(update.key).toString('base64');
   }
 
-  const next: Stored = { engine: update.engine, baseUrl: update.baseUrl, model: update.model, key };
+  const { engine, speech, baseUrl, model, speechModel } = update;
+  const next: Stored = { engine, speech, baseUrl, model, speechModel, key };
   fs.writeFileSync(settingsFile(), JSON.stringify(next), { mode: 0o600 });
   return aiSettings();
 };

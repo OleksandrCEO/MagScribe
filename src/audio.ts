@@ -65,6 +65,7 @@ const runFfmpeg = (
   // Called once, as soon as ffmpeg prints the length of the input. Returning a message aborts the run with it:
   // this is where a decode too big for the machine is turned down, before any of it is in memory.
   onDuration?: (seconds: number) => string | null,
+  input?: Uint8Array, // written to stdin, for `-i pipe:0`
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const binary = ffmpegBinary();
@@ -86,6 +87,9 @@ const runFfmpeg = (
     let duration = 0;
 
     ffmpeg.stdout.on('data', (chunk: Buffer) => onData?.(chunk));
+    // An ffmpeg that dies mid-input breaks the pipe; `close` below reports why, the EPIPE itself must not throw.
+    ffmpeg.stdin.on('error', () => undefined);
+    if (input) ffmpeg.stdin.end(input);
     ffmpeg.stderr.on('data', (chunk: Buffer) => {
       const lines = (pendingLine + chunk.toString()).split('\n');
       pendingLine = lines.pop() ?? '';
@@ -193,6 +197,24 @@ export const discardStaleExports = (): void => {
 
 /** The file `exportAudio` produced last — the only source `audio:save` agrees to copy out. */
 export const isExport = (filePath: string): boolean => filePath === lastExport;
+
+/**
+ * 16 kHz mono samples as OGG/Opus in memory — a piece of a recording for a transcription API, a tenth of its WAV.
+ * ponytail: 24 kbps is ample for speech recognition; raise it if a provider ever complains about quality.
+ */
+export const encodeOpus = async (samples: Float32Array): Promise<Uint8Array<ArrayBuffer>> => {
+  const chunks: Buffer[] = [];
+  await runFfmpeg(
+    ['-f', 'f32le', '-ar', String(SAMPLE_RATE), '-ac', '1', '-i', 'pipe:0',
+      '-c:a', 'libopus', '-b:a', '24k', '-f', 'ogg', 'pipe:1'],
+    undefined,
+    (chunk) => chunks.push(chunk),
+    0,
+    undefined,
+    new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength),
+  );
+  return Buffer.concat(chunks);
+};
 
 /** Re-encodes the audio track to OGG/Opus in the temp folder — the container Telegram plays as a voice message. */
 export const exportAudio = async (filePath: string, onProgress?: OnProgress): Promise<ExportedAudio> => {

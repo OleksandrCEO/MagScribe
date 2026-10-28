@@ -23,11 +23,12 @@ import type { ExportedAudio, SelectedFile } from './preload';
 import { parseCli, renderOutput, USAGE, type CliJob } from './cli';
 import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractAudio, ffmpegBinary, isExport } from './audio';
 import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
-import { MAX_BROWSER_DECODE } from './pcm';
+import { API_CHUNK_S, MAX_BROWSER_DECODE, SAMPLE_RATE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS, cancelAi } from './summary';
 import { aiSettings, saveAiSettings } from './aiSettings';
 import { parseUpdate, type AiSettings } from './api';
+import { transcribeApi } from './speech';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -370,6 +371,18 @@ ipcMain.handle('audio:extract', (event, filePath: unknown, from: unknown): Promi
 ipcMain.handle('audio:export', (event, filePath: unknown): Promise<ExportedAudio> =>
   exportAudio(requirePath(filePath, 'audio:export'), (percent) => event.sender.send('audio:progress', percent)),
 );
+
+// One piece of the recording to the transcription API. The window cuts it; main checks the cut is one it agreed
+// to (a stop goes through ai:cancel, like a summary's).
+ipcMain.handle('speech:run', (_event, samples: unknown, language: unknown) => {
+  if (!(samples instanceof Float32Array) || samples.length === 0 || samples.length > API_CHUNK_S * SAMPLE_RATE) {
+    throw new Error('speech:run needs at most one chunk of samples');
+  }
+  if (language !== null && (typeof language !== 'string' || !/^[a-z]{2}$/.test(language))) {
+    throw new Error('speech:run: malformed language');
+  }
+  return transcribeApi(samples, language);
+});
 
 // Without ffmpeg the window decodes the file itself, with the browser's decoder, and for that it needs the
 // bytes. Only as far as that decoder can reasonably go: it holds the whole thing in memory at once.

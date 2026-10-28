@@ -3,7 +3,7 @@ import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { AI_ENGINES, type AiSettings, type AiSettingsUpdate } from '@/api';
+import { AI_ENGINES, SPEECH_ENGINES, type AiSettings, type AiSettingsUpdate } from '@/api';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
@@ -224,18 +224,26 @@ function Choice<T extends string>({
 const inputClass = 'text-[13px] md:text-[13px] dark:bg-background';
 
 /**
- * The engine behind «Опрацювати» and the chapters. Its settings live in main, the key with them, so the form is
- * loaded on every open and saved with a button: the key field is write-only, and half-typed values are no setting.
+ * The engines for the transcription and for «Опрацювати» with the chapters. Their settings live in main, the key
+ * with them, so the form is loaded on every open and saved with a button: the key field is write-only, and
+ * half-typed values are no setting. Both API engines share the address and the key.
  */
-function AiEngineSection({ s, open }: { s: Strings; open: boolean }) {
+function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
   const [saved, setSaved] = useState<AiSettings | null>(null);
-  const [form, setForm] = useState<Omit<AiSettingsUpdate, 'key'>>({ engine: 'claude', baseUrl: '', model: '' });
+  const [form, setForm] = useState<Omit<AiSettingsUpdate, 'key'>>({
+    engine: 'claude',
+    speech: 'whisper',
+    baseUrl: '',
+    model: '',
+    speechModel: '',
+  });
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const show = (settings: AiSettings): void => {
+    const { engine, speech, baseUrl, model, speechModel } = settings;
     setSaved(settings);
-    setForm({ engine: settings.engine, baseUrl: settings.baseUrl, model: settings.model });
+    setForm({ engine, speech, baseUrl, model, speechModel });
     setKey('');
     setError(null);
   };
@@ -251,15 +259,24 @@ function AiEngineSection({ s, open }: { s: Strings; open: boolean }) {
   };
 
   if (!saved) return null;
-  const dirty =
-    key !== '' || form.engine !== saved.engine || form.baseUrl !== saved.baseUrl || form.model !== saved.model;
+  const usesApi = form.engine === 'api' || form.speech === 'api';
+  const dirty = key !== '' || (Object.keys(form) as (keyof typeof form)[]).some((name) => form[name] !== saved[name]);
   const fields = [
-    { name: 'baseUrl', label: s.settings.baseUrl, placeholder: 'https://api.openai.com/v1' },
-    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini' },
+    { name: 'baseUrl', label: s.settings.baseUrl, placeholder: 'https://api.openai.com/v1', shown: usesApi },
+    { name: 'speechModel', label: s.settings.speechModel, placeholder: 'whisper-1', shown: form.speech === 'api' },
+    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini', shown: form.engine === 'api' },
   ] as const;
 
   return (
     <div className="flex flex-col gap-2.5">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
+        <Choice
+          value={form.speech}
+          options={SPEECH_ENGINES.map((value) => ({ value, label: s.settings.speechEngines[value] }))}
+          onChange={(speech) => setForm({ ...form, speech })}
+        />
+      </div>
       <div className="flex items-center justify-between gap-4">
         <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
         <Choice
@@ -269,10 +286,10 @@ function AiEngineSection({ s, open }: { s: Strings; open: boolean }) {
         />
       </div>
 
-      {form.engine === 'api' && (
+      {usesApi && (
         <>
           <p className="text-xs leading-[1.55] text-muted-foreground">{rich(s.settings.apiHint)}</p>
-          {fields.map(({ name, label, placeholder }) => (
+          {fields.filter(({ shown }) => shown).map(({ name, label, placeholder }) => (
             <label key={name} className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">{label}</span>
               <Input
@@ -313,7 +330,11 @@ function AiEngineSection({ s, open }: { s: Strings; open: boolean }) {
 
       {error && <p className="text-xs leading-[1.55] text-destructive">{error}</p>}
       {dirty && (
-        <Button size="sm" className="self-end px-3" onClick={() => void submit({ ...form, ...(form.engine === 'api' && key && { key }) })}>
+        <Button
+          size="sm"
+          className="self-end px-3"
+          onClick={() => void submit({ ...form, ...(usesApi && key && { key }) })}
+        >
           {s.settings.save}
         </Button>
       )}
@@ -384,7 +405,7 @@ export function SettingsDialog({
           />
         </div>
 
-        <AiEngineSection s={s} open={open} />
+        <EnginesSection s={s} open={open} />
 
         <div className="flex flex-col gap-4">
           <p className="text-xs leading-[1.55] text-muted-foreground">{s.settings.promptsHint}</p>

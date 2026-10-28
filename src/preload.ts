@@ -48,6 +48,9 @@ const api = {
     ipcRenderer.invoke('ai:run', 'summary', transcript, prompt),
   chapters: (timedTranscript: string, prompt: string): Promise<string> =>
     ipcRenderer.invoke('ai:run', 'chapters', timedTranscript, prompt),
+  // One piece of at most API_CHUNK_S seconds to the transcription API; stopped by cancelAi.
+  transcribeChunk: (samples: Float32Array, language: string | null): Promise<{ text: string; segments: Segment[] }> =>
+    ipcRenderer.invoke('speech:run', samples, language),
   // The engine settings without the key; the key goes one way only, inside an update.
   getAiSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:settings'),
   setAiSettings: (update: AiSettingsUpdate): Promise<{ settings: AiSettings } | { error: string }> =>
