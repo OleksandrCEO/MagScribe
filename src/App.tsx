@@ -255,7 +255,8 @@ export default function App() {
   // The summary run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
   // window has to ask, and nothing new may start underneath it and then be overwritten by its answer.
   const busy = job !== null;
-  const viaApi = engines?.speech === 'api'; // the transcription goes to the API: no model to load or to ask about
+  // The transcription goes to an API: no model to load or to ask about.
+  const viaApi = engines !== null && engines.speech !== 'whisper';
 
   const stopDragging = (): void => {
     dragDepth.current = 0;
@@ -575,7 +576,7 @@ export default function App() {
 
   // What does the transcription and how, for the status line and the About window.
   const engineLine = viaApi
-    ? `${engines.speechModel} · ${engines.baseUrl && new URL(engines.baseUrl).host}`
+    ? `${engines.apis.speech.model} · ${engines.apis.speech.baseUrl && new URL(engines.apis.speech.baseUrl).host}`
     : model && `${model.adapter} · ${model.encoder}`;
   // A Whisper that failed is no news while the API transcribes.
   const shownError = viaApi ? null : modelError;

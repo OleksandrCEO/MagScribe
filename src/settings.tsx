@@ -1,12 +1,22 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { AI_ENGINES, SPEECH_ENGINES, type AiSettings, type AiSettingsUpdate, type ApiCheck } from '@/api';
+import {
+  AI_ENGINES,
+  rolesInUse,
+  type AiSettings,
+  type AiSettingsUpdate,
+  type ApiCheck,
+  type ApiRole,
+  type Connection,
+  type SpeechEngine,
+} from '@/api';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
+import { DEEPGRAM, SUMMARY_PROVIDERS, type Provider } from '@/providers';
 import { cn } from 'cn';
 
 // Read by the window and by the command line's hidden one, which shares the origin and so the person's choices.
@@ -94,7 +104,7 @@ function Modal({ open, title, close, onClose, children }: ModalProps) {
       // A click that lands on the dialog element itself landed on the backdrop — the content sits in the div.
       onClick={(event) => event.target === ref.current && onClose()}
       className={cn(
-        'm-auto w-110 max-w-[calc(100%-3rem)] rounded-2xl border bg-card p-0 text-foreground',
+        'm-auto w-136 max-w-[calc(100%-3rem)] rounded-2xl border bg-card p-0 text-foreground',
         'max-h-[85vh] overflow-y-auto [scrollbar-width:thin]',
         'shadow-[0_24px_64px_-24px_rgb(0_0_0/0.5)] backdrop:bg-black/35',
       )}
@@ -190,7 +200,7 @@ export function ModelPicker({ s, value, states, recommended, device, fp16, busy,
   );
 }
 
-/** A row of plain words with one of them on: the interface language, the summary engine. */
+/** A row of plain words with one of them on: the interface language, an engine, a provider. Wraps when long. */
 function Choice<T extends string>({
   value,
   options,
@@ -201,7 +211,7 @@ function Choice<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
+    <div className="flex flex-wrap items-center gap-0.5 self-start rounded-[10px] border bg-background p-[3px]">
       {options.map((option) => (
         <Button
           key={option.value}
@@ -223,38 +233,53 @@ function Choice<T extends string>({
 
 const inputClass = 'text-[13px] md:text-[13px] dark:bg-background';
 
+type Form = Pick<AiSettings, 'engine' | 'speech'> & { apis: Record<ApiRole, Connection> };
+
+const formOf = ({ engine, speech, apis }: AiSettings): Form => ({
+  engine,
+  speech,
+  apis: {
+    speech: { baseUrl: apis.speech.baseUrl, model: apis.speech.model },
+    summary: { baseUrl: apis.summary.baseUrl, model: apis.summary.model },
+  },
+});
+
+/** A preset's address and its first model, or nothing at all for «Локально». */
+const fill = (preset: Provider | null): Connection =>
+  preset ? { baseUrl: preset.baseUrl, model: preset.models[0]?.id ?? '' } : { baseUrl: '', model: '' };
+
+/** The form with the transcription on an API: the one set up before, or Deepgram when there is none. */
+const withApiSpeech = (form: Form, before: SpeechEngine): Form => {
+  const { baseUrl } = form.apis.speech;
+  if (!baseUrl) return { ...form, speech: 'deepgram', apis: { ...form.apis, speech: fill(DEEPGRAM) } };
+  return { ...form, speech: before !== 'whisper' ? before : baseUrl === DEEPGRAM.baseUrl ? 'deepgram' : 'api' };
+};
+
 type EnginesProps = {
   s: Strings;
   open: boolean;
   busy: boolean; // a run is going on: «Перевірити» would race its request for the one cancel handle in main
-  // The first-run form: transcription over the API and nothing else to choose, so the engine rows, the summary
-  // model and «Перевірити» stay out of it. Called with what was saved.
+  // The first-run form: transcription over an API and nothing else to choose, so the engine rows, the summary
+  // and «Перевірити» stay out of it. Called with what was saved.
   onSaved?: (settings: AiSettings) => void;
 };
 
 /**
- * The engines for the transcription and for «Опрацювати» with the chapters. Their settings live in main, the key
- * with them, so the form is loaded on every open and saved with a button: the key field is write-only, and
- * half-typed values are no setting. Both API engines share the address and the key.
+ * The engines for the transcription and for «Опрацювати» with the chapters, each API with its own preset, address,
+ * model and key. Their settings live in main, the keys with them, so the form is loaded on every open and saved
+ * with a button: the key fields are write-only, and half-typed values are no setting.
  */
 function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
   const [saved, setSaved] = useState<AiSettings | null>(null);
-  const [form, setForm] = useState<Omit<AiSettingsUpdate, 'key'>>({
-    engine: 'claude',
-    speech: 'whisper',
-    baseUrl: '',
-    model: '',
-    speechModel: '',
-  });
-  const [key, setKey] = useState('');
+  const [form, setForm] = useState<Form | null>(null);
+  const [keys, setKeys] = useState<Record<ApiRole, string>>({ speech: '', summary: '' });
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState<ApiCheck | 'running' | null>(null);
 
   const show = (settings: AiSettings): void => {
-    const { engine, speech, baseUrl, model, speechModel } = settings;
     setSaved(settings);
-    setForm({ engine, speech: onSaved ? 'api' : speech, baseUrl, model, speechModel });
-    setKey('');
+    setForm(onSaved ? withApiSpeech(formOf(settings), settings.speech) : formOf(settings));
+    setKeys({ speech: '', summary: '' });
     setError(null);
     setCheck(null);
   };
@@ -277,81 +302,134 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
     setCheck(await window.api.checkApi());
   };
 
-  if (!saved) return null;
-  const usesApi = form.engine === 'api' || form.speech === 'api';
-  const dirty = key !== '' || (Object.keys(form) as (keyof typeof form)[]).some((name) => form[name] !== saved[name]);
-  const fields = [
-    { name: 'baseUrl', label: s.settings.baseUrl, placeholder: 'https://api.openai.com/v1', shown: usesApi },
-    { name: 'speechModel', label: s.settings.speechModel, placeholder: 'whisper-1', shown: form.speech === 'api' },
-    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini', shown: form.engine === 'api' && !onSaved },
-  ] as const;
-  // A new address drops the stored key on save, so the field stops calling it saved as soon as the address changes.
-  const keyKept = saved.hasKey && form.baseUrl === saved.baseUrl;
+  if (!saved || !form) return null;
+  const inUse = rolesInUse(form);
+  const dirty = keys.speech !== '' || keys.summary !== '' || JSON.stringify(form) !== JSON.stringify(formOf(saved));
+
+  const save = (): void => {
+    const withKey = (role: ApiRole) => ({
+      ...form.apis[role],
+      ...(inUse.includes(role) && keys[role] && { key: keys[role] }),
+    });
+    void submit({ ...form, apis: { speech: withKey('speech'), summary: withKey('summary') } });
+  };
+
+  // What is saved, not what is typed: forgetting a key must not store a half-edited form.
+  const forget = (role: ApiRole): void => {
+    const kept = formOf(saved);
+    void submit({ ...kept, apis: { ...kept.apis, [role]: { ...kept.apis[role], key: '' } } });
+  };
+
+  const pick = (role: ApiRole, preset: Provider | null): void =>
+    setForm({
+      ...form,
+      ...(role === 'speech' && { speech: preset ? 'deepgram' : 'api' }),
+      apis: { ...form.apis, [role]: fill(preset) },
+    });
+
+  /** One engine's API: the preset (or «Локально»), the address, the model with the preset's suggestions, the key. */
+  const connection = (role: ApiRole): ReactNode => {
+    const value = form.apis[role];
+    const presets = role === 'speech' ? [DEEPGRAM] : SUMMARY_PROVIDERS;
+    const preset =
+      role === 'speech'
+        ? form.speech === 'deepgram'
+          ? DEEPGRAM
+          : null
+        : (SUMMARY_PROVIDERS.find(({ baseUrl }) => baseUrl === value.baseUrl) ?? null);
+    const stored = saved.apis[role];
+    const list = `${role}-models`;
+    const field = (name: keyof Connection, label: string, input: ReactNode): ReactNode => (
+      <label key={name} className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        {input}
+      </label>
+    );
+    const text = (name: keyof Connection, placeholder?: string) => ({
+      value: value[name],
+      placeholder,
+      spellCheck: false,
+      className: inputClass,
+      onChange: (event: ChangeEvent<HTMLInputElement>) =>
+        setForm({ ...form, apis: { ...form.apis, [role]: { ...value, [name]: event.target.value } } }),
+    });
+
+    return (
+      <div className="flex flex-col gap-2.5 border-l-2 pl-3">
+        <Choice
+          value={preset?.name ?? ''}
+          options={[
+            ...presets.map(({ name }) => ({ value: name, label: name })),
+            { value: '', label: s.settings.custom },
+          ]}
+          onChange={(name) => pick(role, presets.find((candidate) => candidate.name === name) ?? null)}
+        />
+        <p className="text-xs leading-[1.55] text-muted-foreground">
+          {rich(role === 'speech' ? s.settings.speechHint : s.settings.summaryHint)}
+        </p>
+        {field('baseUrl', s.settings.baseUrl, <Input {...text('baseUrl', 'https://…/v1')} />)}
+        {field(
+          'model',
+          role === 'speech' ? s.settings.speechModel : s.settings.apiModel,
+          <>
+            {/* The preset's models as suggestions; any other id can still be typed. */}
+            <Input list={list} {...text('model')} />
+            <datalist id={list}>
+              {preset?.models.map(({ id, tier }) => (
+                <option key={id} value={id} label={tier && s.settings.tier[tier]} />
+              ))}
+            </datalist>
+          </>,
+        )}
+        <label className="flex flex-col gap-1">
+          <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            {s.settings.apiKey}
+            {stored.hasKey && (
+              <Button variant="ghost" size="xs" className="-my-1 text-muted-foreground" onClick={() => forget(role)}>
+                {s.settings.forgetKey}
+              </Button>
+            )}
+          </span>
+          <Input
+            type="password"
+            autoComplete="off"
+            value={keys[role]}
+            // A new address drops the stored key on save, so it is «saved» only while the address is the same.
+            placeholder={stored.hasKey && value.baseUrl === stored.baseUrl ? s.settings.keySaved : s.settings.keyNone}
+            className={inputClass}
+            onChange={(event) => setKeys({ ...keys, [role]: event.target.value })}
+          />
+        </label>
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-2.5">
       {!onSaved && (
-        <>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
-            <Choice
-              value={form.speech}
-              options={SPEECH_ENGINES.map((value) => ({ value, label: s.settings.speechEngines[value] }))}
-              onChange={(speech) => setForm({ ...form, speech })}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
-            <Choice
-              value={form.engine}
-              options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
-              onChange={(engine) => setForm({ ...form, engine })}
-            />
-          </div>
-        </>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
+          <Choice
+            value={form.speech === 'whisper' ? 'whisper' : 'api'}
+            options={(['whisper', 'api'] as const).map((value) => ({ value, label: s.settings.speechEngines[value] }))}
+            onChange={(value) =>
+              setForm(value === 'whisper' ? { ...form, speech: 'whisper' } : withApiSpeech(form, saved.speech))
+            }
+          />
+        </div>
       )}
-
-      {usesApi && (
-        <>
-          <p className="text-xs leading-[1.55] text-muted-foreground">{rich(s.settings.apiHint)}</p>
-          {fields.filter(({ shown }) => shown).map(({ name, label, placeholder }) => (
-            <label key={name} className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">{label}</span>
-              <Input
-                value={form[name]}
-                placeholder={placeholder}
-                spellCheck={false}
-                className={inputClass}
-                onChange={(event) => setForm({ ...form, [name]: event.target.value })}
-              />
-            </label>
-          ))}
-          <label className="flex flex-col gap-1">
-            <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-              {s.settings.apiKey}
-              {saved.hasKey && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="-my-1 text-muted-foreground"
-                  // What is saved, not what is typed: forgetting the key must not store a half-edited address.
-                  onClick={() => void submit({ ...saved, key: '' })}
-                >
-                  {s.settings.forgetKey}
-                </Button>
-              )}
-            </span>
-            <Input
-              type="password"
-              autoComplete="off"
-              value={key}
-              placeholder={keyKept ? s.settings.keySaved : s.settings.keyNone}
-              className={inputClass}
-              onChange={(event) => setKey(event.target.value)}
-            />
-          </label>
-        </>
+      {form.speech !== 'whisper' && connection('speech')}
+      {!onSaved && (
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
+          <Choice
+            value={form.engine}
+            options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
+            onChange={(engine) => setForm({ ...form, engine })}
+          />
+        </div>
       )}
+      {!onSaved && form.engine === 'api' && connection('summary')}
 
       {error && <p className="text-xs leading-[1.55] text-destructive">{error}</p>}
       {Array.isArray(check) &&
@@ -364,17 +442,12 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
           </p>
         ))}
       {/* Unsaved changes are saved first; what is checked is always what is stored. */}
-      {dirty ? (
-        <Button
-          size="sm"
-          className="self-end px-3"
-          onClick={() => void submit({ ...form, ...(usesApi && key && { key }) })}
-        >
+      {dirty || onSaved ? (
+        <Button size="sm" className="self-end px-3" onClick={save}>
           {s.settings.save}
         </Button>
       ) : (
-        usesApi &&
-        !onSaved && (
+        inUse.length > 0 && (
           <Button
             variant="outline"
             size="sm"
@@ -495,7 +568,7 @@ export function SettingsDialog({
 
 /**
  * The other answer to «download the model?»: transcribe over an API instead. Folded away behind one line, since
- * the question is about the model; unfolded, it is the engines form cut down to the address, the model and the key.
+ * the question is about the model; unfolded, it is the engines form cut down to the transcription's API.
  */
 export function KeyBranch({ s, onSaved }: { s: Strings; onSaved: (settings: AiSettings) => void }) {
   const [unfolded, setUnfolded] = useState(false);

@@ -207,9 +207,13 @@ const uk = {
     speechEngines: { whisper: 'Модель розпізнавання', api: 'API' },
     aiEngine: 'Конспект і таймкоди',
     engines: { claude: 'Команда claude', api: 'API' },
-    apiHint:
-      'Будь-який OpenAI-сумісний API: OpenAI, OpenRouter, Groq, ollama, LM Studio. Адреса — до `/v1` включно. '
-      + 'Для розшифровки потрібна модель із таймкодами: `whisper-1` в OpenAI, `whisper-large-v3` у Groq.',
+    custom: 'Локально',
+    speechHint:
+      'Deepgram — або «Локально»: будь-який OpenAI-сумісний `/audio/transcriptions` з таймкодами (`verbose_json`, як '
+      + 'у `whisper-1`). Адреса — до `/v1` включно.',
+    summaryHint: 'Будь-який OpenAI-сумісний `/chat/completions`. Модель — зі списку або будь-яка інша вручну.',
+    // How the model suggestions are labelled; see providers.ts.
+    tier: { cheap: 'дешевша', light: 'легша', smart: 'розумніша' },
     baseUrl: 'Адреса',
     speechModel: 'Модель розшифровки',
     apiModel: 'Модель конспекту',
@@ -261,7 +265,7 @@ const uk = {
     apiTimeout: (seconds: number): string => `Сервер не відповів за ${seconds} секунд`,
     noTimestamps: (model: string): string =>
       `Модель ${model} повернула текст без таймкодів, а без них не буде ні субтитрів, ні розділів. Обери модель, `
-      + 'що вміє verbose_json, — наприклад, whisper-1 чи whisper-large-v3.',
+      + 'що вміє verbose_json (наприклад, whisper-1), або Deepgram.',
     adapterNull: 'requestAdapter() повернув null',
     unknownAdapter: 'невідомий адаптер',
     softwareAdapter: (label: string): string => `програмний адаптер «${label}» замість відеокарти`,
@@ -460,9 +464,12 @@ const en: typeof uk = {
     speechEngines: { whisper: 'Speech model', api: 'API' },
     aiEngine: 'Summary and chapters',
     engines: { claude: 'claude command', api: 'API' },
-    apiHint:
-      'Any OpenAI-compatible API: OpenAI, OpenRouter, Groq, ollama, LM Studio. The address goes up to `/v1`. '
-      + 'Transcription needs a model with timestamps: `whisper-1` at OpenAI, `whisper-large-v3` at Groq.',
+    custom: 'Local',
+    speechHint:
+      'Deepgram — or “Local”: any OpenAI-compatible `/audio/transcriptions` with timestamps (`verbose_json`, like '
+      + '`whisper-1`). The address goes up to `/v1`.',
+    summaryHint: 'Any OpenAI-compatible `/chat/completions`. A model from the list, or any other typed by hand.',
+    tier: { cheap: 'cheaper', light: 'lighter', smart: 'smarter' },
     baseUrl: 'Address',
     speechModel: 'Transcription model',
     apiModel: 'Summary model',
@@ -511,7 +518,7 @@ const en: typeof uk = {
     apiTimeout: (seconds: number): string => `The server did not answer within ${seconds} seconds`,
     noTimestamps: (model: string): string =>
       `The model ${model} returned text without timestamps, and without them there are no subtitles and no `
-      + 'chapters. Pick a model that does verbose_json, such as whisper-1 or whisper-large-v3.',
+      + 'chapters. Pick a model that does verbose_json (such as whisper-1), or Deepgram.',
     adapterNull: 'requestAdapter() returned null',
     unknownAdapter: 'unknown adapter',
     softwareAdapter: (label: string): string => `software adapter “${label}” instead of a graphics card`,

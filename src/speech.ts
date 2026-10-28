@@ -1,9 +1,10 @@
 /**
- * The API transcription engine: one piece of a recording (the window cuts it, see `splitAtSilence`) to
- * `{baseUrl}/audio/transcriptions`, segments back. Main only — the key never reaches the window.
+ * The API transcription engines: one piece of a recording (the window cuts it, see `splitAtSilence`) to the
+ * transcription API from the settings, segments back — an OpenAI-compatible `/audio/transcriptions` or Deepgram's
+ * `/listen`. Main only — the key never reaches the window.
  */
 import { aiSettings } from './aiSettings';
-import { readSegments } from './api';
+import { deepgramPath, readDeepgram, readSegments } from './api';
 import { postApi } from './apiRequest';
 import { encodeOpus, ffmpegBinary } from './audio';
 import { t } from './i18n';
@@ -14,19 +15,27 @@ export const transcribeApi = async (
   samples: Float32Array,
   language: string | null,
 ): Promise<{ text: string; segments: Segment[] }> => {
-  const { speechModel } = aiSettings();
-  if (!speechModel) throw new Error(t().error.apiIncomplete);
+  const { speech, apis } = aiSettings();
+  const { model } = apis.speech;
+  if (!model) throw new Error(t().error.apiIncomplete);
 
   // Opus when ffmpeg is here to encode it; WAV, which needs nothing, when it is not.
   const opus = ffmpegBinary() !== null;
-  const audio = opus ? await encodeOpus(samples) : toWav(samples);
-  const form = new FormData();
-  form.append('file', new Blob([audio], { type: opus ? 'audio/ogg' : 'audio/wav' }), opus ? 'audio.ogg' : 'audio.wav');
-  form.append('model', speechModel);
-  form.append('response_format', 'verbose_json'); // the only format with timestamps
-  if (language) form.append('language', language);
+  const bytes = opus ? await encodeOpus(samples) : toWav(samples);
+  const audio = new Blob([bytes], { type: opus ? 'audio/ogg' : 'audio/wav' });
 
-  const segments = readSegments(await postApi('/audio/transcriptions', form));
-  if (segments === null) throw new Error(t().error.noTimestamps(speechModel));
+  let segments: Segment[] | null;
+  if (speech === 'deepgram') {
+    // Deepgram takes the bare file; the model and the language go in the query.
+    segments = readDeepgram(await postApi('speech', deepgramPath(model, language), audio));
+  } else {
+    const form = new FormData();
+    form.append('file', audio, opus ? 'audio.ogg' : 'audio.wav');
+    form.append('model', model);
+    form.append('response_format', 'verbose_json'); // the only format with timestamps
+    if (language) form.append('language', language);
+    segments = readSegments(await postApi('speech', '/audio/transcriptions', form));
+  }
+  if (segments === null) throw new Error(t().error.noTimestamps(model));
   return { text: segments.map((segment) => segment.text).join(' '), segments };
 };

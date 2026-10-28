@@ -27,7 +27,7 @@ import { API_CHUNK_S, MAX_BROWSER_DECODE, SAMPLE_RATE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS, cancelAi, runApi } from './summary';
 import { aiSettings, saveAiSettings } from './aiSettings';
-import { parseUpdate, type AiSettings, type ApiCheck } from './api';
+import { parseUpdate, rolesInUse, type AiSettings, type ApiCheck, type ApiRole } from './api';
 import { transcribeApi } from './speech';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
@@ -540,22 +540,23 @@ ipcMain.handle('ai:settings:set', (_event, update: unknown): { settings: AiSetti
   }
 });
 
-// «Перевірити»: one real request to the saved API per engine that uses it, through the same code as the work
+// «Перевірити»: one real request to each saved API in use, through the same code as the work
 // itself — a second of silence to the transcription (which also shows whether the model sends timestamps), a
 // one-word chat to the summary. Each failure is the same sentence the work would have shown.
 ipcMain.handle('ai:check', async (): Promise<ApiCheck> => {
-  const { engine, speech } = aiSettings();
-  const attempt = async (task: ApiCheck[number]['task'], request: () => Promise<unknown>) => {
-    try {
-      await request();
-      return { task, error: null };
-    } catch (error) {
-      return { task, error: error instanceof Error ? error.message : String(error) };
-    }
+  const requests: Record<ApiRole, () => Promise<unknown>> = {
+    speech: () => transcribeApi(new Float32Array(SAMPLE_RATE), null),
+    summary: () => runApi('Reply with the single word OK.', 'ping'),
   };
   const results: ApiCheck = [];
-  if (speech === 'api') results.push(await attempt('speech', () => transcribeApi(new Float32Array(SAMPLE_RATE), null)));
-  if (engine === 'api') results.push(await attempt('summary', () => runApi('Reply with the single word OK.', 'ping')));
+  for (const task of rolesInUse(aiSettings())) {
+    try {
+      await requests[task]();
+      results.push({ task, error: null });
+    } catch (error) {
+      results.push({ task, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   return results;
 });
 

@@ -1,10 +1,10 @@
 /**
- * One POST to the OpenAI-compatible API from the settings — the summary and the transcription both go through
+ * One POST to an engine's API from the settings — the summary, the transcription and «Перевірити» all go through
  * here, so the key, the timeout, the redirect fence and the error wording live in one place. Main only.
  */
 import { net } from 'electron';
 import { aiKey, aiSettings } from './aiSettings';
-import { errorDetail } from './api';
+import { errorDetail, type ApiRole } from './api';
 import { t } from './i18n';
 
 // A summary reads the whole transcript, a transcription uploads ten minutes of audio: either is a long wait.
@@ -22,13 +22,17 @@ export const cancelApi = (): void => {
 };
 
 /**
- * Posts `body` to `{baseUrl}{path}` with the stored key and answers with the parsed JSON (null when the body is
- * not JSON). A string goes as JSON, a FormData as multipart. Anything that goes wrong is a readable message.
+ * Posts `body` to `{baseUrl}{path}` of the `role`'s API with its stored key and answers with the parsed JSON (null
+ * when the body is not JSON). A string goes as JSON, a FormData as multipart, a Blob as its own type. Anything that
+ * goes wrong is a readable message.
  */
-export const postApi = async (path: string, body: string | FormData): Promise<unknown> => {
-  const { baseUrl } = aiSettings();
+export const postApi = async (role: ApiRole, path: string, body: string | FormData | Blob): Promise<unknown> => {
+  const settings = aiSettings();
+  const { baseUrl } = settings.apis[role];
   if (!baseUrl) throw new Error(t().error.apiIncomplete); // engines.json edited by hand, or half-written
-  const key = aiKey();
+  const key = aiKey(role);
+  // Deepgram takes the key as `Token`; everything OpenAI-compatible as `Bearer`.
+  const scheme = role === 'speech' && settings.speech === 'deepgram' ? 'Token' : 'Bearer';
   const cancel = new AbortController();
   request = cancel;
   const signal = AbortSignal.any([cancel.signal, AbortSignal.timeout(TIMEOUT_MS)]);
@@ -41,7 +45,8 @@ export const postApi = async (path: string, body: string | FormData): Promise<un
         method: 'POST',
         headers: {
           ...(typeof body === 'string' && { 'content-type': 'application/json' }),
-          ...(key !== null && { authorization: `Bearer ${key}` }),
+          ...(body instanceof Blob && { 'content-type': body.type }),
+          ...(key !== null && { authorization: `${scheme} ${key}` }),
         },
         body,
         // An API does not redirect a POST; a server that tries is not getting the key and the content elsewhere.
