@@ -49,15 +49,35 @@ Desktop app: converts video/audio files and transcribes them. The transcription 
 ## Release
 
 **A release targets three OS: Windows, macOS and Ubuntu** (the `.deb`). When the developer says «ОС», «усі ОС» or a
-number of them, these are the ones — never just Windows and macOS. NixOS is not a release target: it builds
-straight from the repository (`npm run package && nix-build nix/magscribe.nix`).
+number of them, these are the ones — never just Windows and macOS. NixOS gets no installer of its own: a local
+build comes straight from the repository (`npm run package && nix-build nix/magscribe.nix`), and the flake wraps
+the release's `.deb` (step 3 below).
 
-The flake's `packages.default` is what a NixOS config installs (`inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`). It fetches `magscribe-<version>-linux-x64.tar.gz` from the GitHub release named by `release` in `flake.nix` — its own version and hash, not `package.json`'s, which moves with every commit. A release is:
+Every release carries exactly **four installers**, all made by the Build workflow and named
+`magscribe-<version>-<os>-<arch>.<ext>`: `windows-x64-setup.exe`, `macos-arm64.zip`, `linux-x64.deb`, `linux-x64.rpm`.
+No tarball: the flake's `packages.default` (what a NixOS config with `inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`
+installs) unpacks the `.deb` and wraps it. It reads the release named by `release` in `flake.nix` — a version and
+hash of its own, not `package.json`'s, which moves with every commit.
 
-1. only when the developer says so: `gh release create v<version> --target <full sha> --title … --notes-file …`, with `<version>` the `package.json` of that commit. Publishing starts the Build workflow, which builds that tag on three runners and attaches `magscribe-<version>-{windows-x64-setup.exe,macos-arm64.zip,linux-x64.deb,linux-x64.rpm,linux-x64.tar.gz}` a few minutes later;
-2. once the tarball is there: `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack <its download url>)` → `release.version` and `release.hash` in `flake.nix`, commit and push. Until then the flake keeps installing the previous release.
+The algorithm, every time:
 
-The hash belongs to those exact bytes, and a rebuild gives different ones: once a hash is in `flake.nix`, never run Build for that tag again (`gh workflow run build.yml -f tag=…` re-attaches with `--clobber`). Before committing a hash, test it with `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
+1. **Only when the developer says so.** `gh release create v<version> --target <full sha> --title "MagScribe <version>"
+   --notes-file /tmp/agent/release-notes.md`, with `<version>` the `package.json` of that pushed commit. The notes:
+   a table «system → file» for the four installers, then how to install each (SmartScreen «Докладніше» → «Усе одно
+   запустити»; `xattr -cr /Applications/magscribe.app`; `sudo apt install ./<deb>`; where the `magscribe` command
+   comes from) and ffmpeg (`winget` / `brew` / `apt`). A published non-prerelease becomes Latest by itself.
+2. Publishing starts **Build**: three runners, about four minutes. Wait for it (`gh run watch`), then check that
+   the release holds all four files.
+3. **The flake, in the same sitting.** The `.deb`'s sha256 comes from GitHub, nothing to download:
+   `gh api repos/OleksandrCEO/MagScribe/releases/tags/v<version> -q '.assets[] | select(.name | endswith(".deb")) | .digest'`,
+   then the hex after `sha256:` as SRI: `python3 -c "import base64,sys;print('sha256-'+base64.b64encode(bytes.fromhex(sys.argv[1])).decode())" <hex>`.
+   Put it and the version into `release` in `flake.nix`, check with
+   `nix build path:.#default -o /tmp/agent/flake-result` (add `--override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`
+   to build against the host's nixpkgs), commit `flake: install <version>` and push. Until then the flake keeps
+   installing the previous release.
+
+The hash belongs to those exact bytes, and a rebuild gives different ones: once a hash is in `flake.nix`, never run
+Build for that tag again (`gh workflow run build.yml -f tag=…` re-attaches with `--clobber`).
 
 ## Gotchas
 

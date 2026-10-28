@@ -1,5 +1,6 @@
 # Installable builds, each OS on its own runner: Squirrel wants Windows and the .app wants a Mac. Nothing is
-# signed yet. File names say the OS: magscribe-<version>-<os>-<arch>.<ext>.
+# signed yet. Four installers, the names saying the OS: magscribe-<version>-{windows-x64-setup.exe,macos-arm64.zip,
+# linux-x64.deb,linux-x64.rpm}.
 #
 # - a published release: built from its tag, the files land in the release itself;
 # - started by hand with a tag: the same for that existing release (`gh workflow run build.yml -f tag=v0.9.4`);
@@ -49,10 +50,7 @@ jobs:
             macOS) cp out/make/zip/darwin/arm64/*.zip "dist/magscribe-$v-macos-arm64.zip" ;;
             Linux)
               cp out/make/deb/x64/*.deb "dist/magscribe-$v-linux-x64.deb"
-              cp out/make/rpm/x64/*.rpm "dist/magscribe-$v-linux-x64.rpm"
-              # What the Nix flake fetches, by this exact name — see "Release" in CLAUDE.md.
-              tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 \
-                -czf "dist/magscribe-$v-linux-x64.tar.gz" magscribe-linux-x64
+              cp out/make/rpm/x64/*.rpm "dist/magscribe-$v-linux-x64.rpm" # the Nix flake reads the .deb too
               ;;
           esac
           ls -la dist
