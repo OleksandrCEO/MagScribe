@@ -121,8 +121,8 @@ npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result && nix p
 Наступна збірка — це інший store path, тому перед повторним встановленням зроби `nix profile remove magscribe`.
 
 Windows і macOS збираються на своїх ОС: `npm run make` кладе інсталятор Squirrel (Windows) або ZIP із `.app`
-(macOS) в `out/make`. Без власної машини — workflow **Build** у GitHub Actions (запускається вручну, `gh workflow
-run build.yml`) робить обидві й віддає їх як artifacts.
+(macOS) в `out/make`. Без власної машини — workflow **Build** у GitHub Actions: запущений вручну (`gh workflow run
+build.yml`), він віддає обидві збірки як artifacts, а після публікації релізу сам додає їх до його файлів.
 
 Перевірки:
 

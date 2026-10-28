@@ -1,9 +1,15 @@
 # Installable builds for Windows and macOS, each on its own runner: Squirrel wants Windows and the .app wants a
-# Mac. Linux is packaged locally and wrapped by Nix (see CLAUDE.md). Started by hand; nothing is signed yet.
+# Mac. Linux is packaged locally and wrapped by Nix (see CLAUDE.md). Nothing is signed yet.
+# Started by hand, the builds are artifacts of the run; a published release gets them as its downloads.
 name: Build
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # gh release upload
 
 jobs:
   make:
@@ -25,3 +31,10 @@ jobs:
           name: magscribe-${{ runner.os }}
           path: out/make/**
           if-no-files-found: error
+      # The installer alone on Windows (it carries the nupkg inside), the zipped .app on macOS.
+      - if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: find out/make \( -name '*Setup.exe' -o -name '*.zip' \) -print0 | xargs -0 gh release upload "$TAG" --clobber

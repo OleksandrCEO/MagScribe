@@ -42,7 +42,7 @@ Desktop app: converts video/audio files and transcribes them. The transcription 
 - `npx shadcn@latest add <component>` — add a shadcn component
 - `magick -background none assets/icon.svg -depth 8 assets/icon.png && magick -background none assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico && mkdir -p /tmp/agent/icns && for s in 16 32 128 256 512 1024; do magick -background none -density 600 assets/icon.svg -resize ${s}x${s} -depth 8 /tmp/agent/icns/icon_$s.png; done && nix shell nixpkgs#libicns -c png2icns assets/icon.icns /tmp/agent/icns/icon_{16,32,128,256,512,1024}.png` — regenerate the icons after editing `assets/icon.svg` (the master; never hand-edit the raster)
 - `npm start` — dev run (Vite + Electron window); the developer runs this, ask before launching it yourself
-- Windows and macOS: `npm run make` on that OS, or the manual **Build** workflow (`gh workflow run build.yml`), which makes both on GitHub's runners and uploads them as artifacts. Unsigned for now.
+- Windows and macOS: `npm run make` on that OS, or the manual **Build** workflow (`gh workflow run build.yml`), which makes both on GitHub's runners and uploads them as artifacts; publishing a release runs it too and attaches the Windows installer and the macOS zip to that release. Unsigned for now.
 - `npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result` — build the installable app, then `nix profile add /tmp/magscribe-result` puts MagScribe in the application menu (`install` is a deprecated alias and warns). A later build is a store path of its own, so replace it with `nix profile remove magscribe` first. See `nix/magscribe.nix`
 - On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `nix/electron-libs.nix`
 
@@ -53,7 +53,7 @@ The flake's `packages.default` is what a NixOS config installs (`inputs.magscrib
 1. bump `package.json`, then `npm run package`;
 2. `tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 -czf /tmp/agent/magscribe-<version>-linux-x64.tar.gz magscribe-linux-x64`;
 3. `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack file:///tmp/agent/magscribe-<version>-linux-x64.tar.gz)` → the `hash` in `flake.nix`;
-4. commit and push, then — only when the developer says so — tag `v<version>`, push the tag, and `gh release create v<version> <tarball>`.
+4. commit and push, then — only when the developer says so — tag `v<version>`, push the tag, and `gh release create v<version> <tarball>`. Publishing it starts the Build workflow, which adds the Windows and macOS downloads a few minutes later.
 
 The tarball must be the one the hash was taken from: rebuilding gives different bytes. Before the release exists, test the flake with `nix store add --name source <unpacked magscribe-linux-x64>` (that is the fixed-output path `fetchzip` would produce) and `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
 
