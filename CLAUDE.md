@@ -1,6 +1,6 @@
 # MagScribe
 
-Desktop app: converts video/audio files and transcribes them. The transcription and the summary are swappable engines — `docs/concept.md` holds the idea, `docs/engines.md` the plan. **Copy is neutral**: UI strings, README, package and desktop descriptions say what the app does (transcription, subtitles, chapters) and never where it runs — no «local», «on your machine», «what leaves your machine», no privacy tables. The app is universal, not local; such a promise would have to be rewritten with every new engine.
+Desktop app: converts video/audio files and transcribes them. The transcription and the summary are swappable engines — `docs/concept.md` holds the idea, `docs/engines.md` the plan. **Copy states facts, never promises**: UI strings, README, package and desktop descriptions say what the app does (transcription, subtitles, chapters). No marketing claims about privacy or where data goes — no «your data never leaves your machine», no privacy tables: the engines are swappable, and such a promise would be untrue for some of them. A neutral fact is fine, «local» included: a local model is local («Локально» labels the self-run API in the settings).
 
 **Stack**: Electron 44 / electron-forge 7 (vite plugin) / Vite 5 / React 19 / TypeScript 5 / Tailwind CSS v4 / shadcn/ui (Base UI variant) / npm
 
