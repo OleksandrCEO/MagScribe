@@ -20,6 +20,10 @@ export type ApiRole = (typeof API_ROLES)[number];
 /** One API as the window edits it. */
 export type Connection = { baseUrl: string; model: string };
 
+/** How the status line and the command line name an API engine: `nova-3 · api.deepgram.com`. */
+export const connectionLabel = ({ baseUrl, model }: Connection): string =>
+  `${model} · ${baseUrl && new URL(baseUrl).host}`;
+
 type Engines = { engine: AiEngine; speech: SpeechEngine };
 
 /** What the settings window may know: everything but the keys themselves. */

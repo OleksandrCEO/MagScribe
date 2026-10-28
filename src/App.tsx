@@ -44,11 +44,12 @@ import {
 } from '@/settings';
 import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
 import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
-import type { AiSettings, SpeechEngine } from '@/api';
+import { connectionLabel, type AiSettings, type SpeechEngine } from '@/api';
 import { useApiSpeech } from '@/useApiSpeech';
 import { useWhisper } from '@/useWhisper';
 import type { Language } from '@/worker';
 import { cn } from 'cn';
+import { errorText } from '@/lib/utils';
 
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
@@ -307,10 +308,7 @@ export default function App() {
   };
 
   const failWith = (error: unknown): void => {
-    const message = error instanceof Error ? error.message : String(error);
-    // A rejection from main arrives wrapped in Electron's «Error invoking remote method '…': Error: »; the words
-    // after it are already written for the person.
-    toast.error(message.replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, ''));
+    toast.error(errorText(error));
   };
 
   /** Stops whatever is running and keeps whatever it has already produced. */
@@ -594,7 +592,7 @@ export default function App() {
 
   // What does the transcription and how, for the status line and the About window.
   const engineLine = viaApi
-    ? `${engines.apis.speech.model} · ${engines.apis.speech.baseUrl && new URL(engines.apis.speech.baseUrl).host}`
+    ? connectionLabel(engines.apis.speech)
     : model && `${model.adapter} · ${model.encoder}`;
   // A Whisper that failed is no news while the API transcribes.
   const shownError = viaApi ? null : modelError;
