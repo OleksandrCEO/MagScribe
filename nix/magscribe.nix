@@ -24,10 +24,11 @@ in
   pkgs ? import lockedNixpkgs { },
   # Where electron-forge writes; the directory is named after productName in package.json.
   app ? ../out/magscribe-linux-x64,
+  # A local build is the version in package.json; the flake passes the release it fetched.
+  version ? (builtins.fromJSON (builtins.readFile ../package.json)).version,
 }:
 
 let
-  inherit (builtins.fromJSON (builtins.readFile ../package.json)) version;
 
   # The Wayland app_id Electron reports is app.getName(), i.e. productName. KDE ties a window to its menu entry
   # (and with it the taskbar icon) by matching that against the desktop file's name, so both must stay this.

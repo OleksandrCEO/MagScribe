@@ -42,20 +42,18 @@ Desktop app: converts video/audio files and transcribes them. The transcription 
 - `npx shadcn@latest add <component>` — add a shadcn component
 - `magick -background none assets/icon.svg -depth 8 assets/icon.png && magick -background none assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico && mkdir -p /tmp/agent/icns && for s in 16 32 128 256 512 1024; do magick -background none -density 600 assets/icon.svg -resize ${s}x${s} -depth 8 /tmp/agent/icns/icon_$s.png; done && nix shell nixpkgs#libicns -c png2icns assets/icon.icns /tmp/agent/icns/icon_{16,32,128,256,512,1024}.png` — regenerate the icons after editing `assets/icon.svg` (the master; never hand-edit the raster)
 - `npm start` — dev run (Vite + Electron window); the developer runs this, ask before launching it yourself
-- Windows and macOS: `npm run make` on that OS, or the manual **Build** workflow (`gh workflow run build.yml`), which makes both on GitHub's runners and uploads them as artifacts; publishing a release runs it too and attaches the Windows installer and the macOS zip to that release. Unsigned for now.
+- Windows and macOS: `npm run make` on that OS, or the manual **Build** workflow (`gh workflow run build.yml`), which makes all three OS on GitHub's runners and keeps them as artifacts of the run; for a release it attaches them to it (see Release). Unsigned for now.
 - `npm run package && nix-build nix/magscribe.nix -o /tmp/magscribe-result` — build the installable app, then `nix profile add /tmp/magscribe-result` puts MagScribe in the application menu (`install` is a deprecated alias and warns). A later build is a store path of its own, so replace it with `nix profile remove magscribe` first. See `nix/magscribe.nix`
 - On NixOS the commands above need the flake devShell (`.envrc` loads it via direnv, or `nix develop`): the npm-downloaded Electron binary is unpatched and nix-ld feeds it the libraries listed in `nix/electron-libs.nix`
 
 ## Release
 
-The flake's `packages.default` is what a NixOS config installs (`inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`). It fetches the electron-forge output from the GitHub release `v<version>`, so a release is:
+The flake's `packages.default` is what a NixOS config installs (`inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`). It fetches `magscribe-<version>-linux-x64.tar.gz` from the GitHub release named by `release` in `flake.nix` — its own version and hash, not `package.json`'s, which moves with every commit. A release is:
 
-1. bump `package.json`, then `npm run package`;
-2. `tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 -czf /tmp/agent/magscribe-<version>-linux-x64.tar.gz magscribe-linux-x64`;
-3. `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack file:///tmp/agent/magscribe-<version>-linux-x64.tar.gz)` → the `hash` in `flake.nix`;
-4. commit and push, then — only when the developer says so — tag `v<version>`, push the tag, and `gh release create v<version> <tarball>`. Publishing it starts the Build workflow, which adds the Windows and macOS downloads a few minutes later.
+1. only when the developer says so: `gh release create v<version> --target <full sha> --title … --notes-file …`, with `<version>` the `package.json` of that commit. Publishing starts the Build workflow, which builds that tag on three runners and attaches `magscribe-<version>-{windows-x64-setup.exe,macos-arm64.zip,linux-x64.deb,linux-x64.rpm,linux-x64.tar.gz}` a few minutes later;
+2. once the tarball is there: `nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack <its download url>)` → `release.version` and `release.hash` in `flake.nix`, commit and push. Until then the flake keeps installing the previous release.
 
-The tarball must be the one the hash was taken from: rebuilding gives different bytes. Before the release exists, test the flake with `nix store add --name source <unpacked magscribe-linux-x64>` (that is the fixed-output path `fetchzip` would produce) and `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
+The hash belongs to those exact bytes, and a rebuild gives different ones: once a hash is in `flake.nix`, never run Build for that tag again (`gh workflow run build.yml -f tag=…` re-attaches with `--clobber`). Before committing a hash, test it with `nix build path:.#default --override-input nixpkgs github:nixos/nixpkgs/<rev from /home/config/flake.lock>`.
 
 ## Gotchas
 
@@ -123,7 +121,8 @@ The tarball must be the one the hash was taken from: rebuilding gives different 
 - Commit format: `scope: description` (e.g. `window: restore size and position on launch`).
 - **Version: one commit, one patch.** `package.json` holds `0.x.y`; bump `y` by one in the same commit, and
   roll the tenth into the next minor (`0.7.9` → `0.8.0`), so a minor reads as «ten improvements». Nothing
-  else carries a version: `nix/magscribe.nix` and the About window both read this field. `1.0.0` comes when
+  else carries a version: `nix/magscribe.nix` and the About window both read this field (the flake's `release` is the
+  version of a published build, not of the code). `1.0.0` comes when
   the app is actually released, not before.
 - **A release is the developer's call**: the tag `v<version>` and `gh release create` publish a build that the
   flake installs from, so they wait for the developer's word (see Release above). Pushing commits does not.

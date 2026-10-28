@@ -1,10 +1,17 @@
-# Installable builds for Windows and macOS, each on its own runner: Squirrel wants Windows and the .app wants a
-# Mac. Linux is packaged locally and wrapped by Nix (see CLAUDE.md). Nothing is signed yet.
-# Started by hand, the builds are artifacts of the run; a published release gets them as its downloads.
+# Installable builds, each OS on its own runner: Squirrel wants Windows and the .app wants a Mac. Nothing is
+# signed yet. File names say the OS: magscribe-<version>-<os>-<arch>.<ext>.
+#
+# - a published release: built from its tag, the files land in the release itself;
+# - started by hand with a tag: the same for that existing release (`gh workflow run build.yml -f tag=v0.9.4`);
+# - started by hand without one: main is built and the files stay artifacts of the run.
 name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to build from and attach the files to, e.g. v0.9.4 (empty — main, artifacts only)
+        required: false
   release:
     types: [published]
 
@@ -16,25 +23,46 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest] # macos-latest is Apple Silicon
+        os: [windows-latest, macos-latest, ubuntu-latest] # macos-latest is Apple Silicon
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm fakeroot
       - run: npm ci
       - run: npm run make
+      - name: Name the files by OS
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          mkdir dist
+          case "$RUNNER_OS" in
+            Windows) cp out/make/squirrel.windows/x64/*Setup.exe "dist/magscribe-$v-windows-x64-setup.exe" ;;
+            macOS) cp out/make/zip/darwin/arm64/*.zip "dist/magscribe-$v-macos-arm64.zip" ;;
+            Linux)
+              cp out/make/deb/x64/*.deb "dist/magscribe-$v-linux-x64.deb"
+              cp out/make/rpm/x64/*.rpm "dist/magscribe-$v-linux-x64.rpm"
+              # What the Nix flake fetches, by this exact name — see "Release" in CLAUDE.md.
+              tar -C out --sort=name --owner=0 --group=0 --numeric-owner --mtime=2026-01-01 \
+                -czf "dist/magscribe-$v-linux-x64.tar.gz" magscribe-linux-x64
+              ;;
+          esac
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: magscribe-${{ runner.os }}
-          path: out/make/**
+          path: dist/*
           if-no-files-found: error
-      # The installer alone on Windows (it carries the nupkg inside), the zipped .app on macOS.
-      - if: github.event_name == 'release'
+      - if: env.TAG != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: find out/make \( -name '*Setup.exe' -o -name '*.zip' \) -print0 | xargs -0 gh release upload "$TAG" --clobber
+        run: gh release upload "$TAG" dist/* --clobber
