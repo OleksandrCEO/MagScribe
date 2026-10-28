@@ -48,6 +48,10 @@ Desktop app: converts video/audio files and transcribes them. The transcription 
 
 ## Release
 
+**A release targets three OS: Windows, macOS and Ubuntu** (the `.deb`). When the developer says «ОС», «усі ОС» or a
+number of them, these are the ones — never just Windows and macOS. NixOS is not a release target: it builds
+straight from the repository (`npm run package && nix-build nix/magscribe.nix`).
+
 The flake's `packages.default` is what a NixOS config installs (`inputs.magscribe.url = "github:OleksandrCEO/MagScribe"`). It fetches `magscribe-<version>-linux-x64.tar.gz` from the GitHub release named by `release` in `flake.nix` — its own version and hash, not `package.json`'s, which moves with every commit. A release is:
 
 1. only when the developer says so: `gh release create v<version> --target <full sha> --title … --notes-file …`, with `<version>` the `package.json` of that commit. Publishing starts the Build workflow, which builds that tag on three runners and attaches `magscribe-<version>-{windows-x64-setup.exe,macos-arm64.zip,linux-x64.deb,linux-x64.rpm,linux-x64.tar.gz}` a few minutes later;
