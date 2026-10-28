@@ -1,7 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { AI_ENGINES, type AiSettings, type AiSettingsUpdate } from '@/api';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
@@ -188,6 +190,137 @@ export function ModelPicker({ s, value, states, recommended, device, fp16, busy,
   );
 }
 
+/** A row of plain words with one of them on: the interface language, the summary engine. */
+function Choice<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          variant="ghost"
+          size="xs"
+          aria-pressed={value === option.value}
+          className={cn(
+            'rounded-[7px] px-2.5 text-muted-foreground',
+            value === option.value && 'bg-muted text-foreground',
+          )}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+const inputClass = 'text-[13px] md:text-[13px] dark:bg-background';
+
+/**
+ * The engine behind «Опрацювати» and the chapters. Its settings live in main, the key with them, so the form is
+ * loaded on every open and saved with a button: the key field is write-only, and half-typed values are no setting.
+ */
+function AiEngineSection({ s, open }: { s: Strings; open: boolean }) {
+  const [saved, setSaved] = useState<AiSettings | null>(null);
+  const [form, setForm] = useState<Omit<AiSettingsUpdate, 'key'>>({ engine: 'claude', baseUrl: '', model: '' });
+  const [key, setKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const show = (settings: AiSettings): void => {
+    setSaved(settings);
+    setForm({ engine: settings.engine, baseUrl: settings.baseUrl, model: settings.model });
+    setKey('');
+    setError(null);
+  };
+
+  useEffect(() => {
+    if (open) void window.api.getAiSettings().then(show);
+  }, [open]);
+
+  const submit = async (update: AiSettingsUpdate): Promise<void> => {
+    const answer = await window.api.setAiSettings(update);
+    if ('error' in answer) setError(answer.error);
+    else show(answer.settings);
+  };
+
+  if (!saved) return null;
+  const dirty =
+    key !== '' || form.engine !== saved.engine || form.baseUrl !== saved.baseUrl || form.model !== saved.model;
+  const fields = [
+    { name: 'baseUrl', label: s.settings.baseUrl, placeholder: 'https://api.openai.com/v1' },
+    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini' },
+  ] as const;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
+        <Choice
+          value={form.engine}
+          options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
+          onChange={(engine) => setForm({ ...form, engine })}
+        />
+      </div>
+
+      {form.engine === 'api' && (
+        <>
+          <p className="text-xs leading-[1.55] text-muted-foreground">{rich(s.settings.apiHint)}</p>
+          {fields.map(({ name, label, placeholder }) => (
+            <label key={name} className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <Input
+                value={form[name]}
+                placeholder={placeholder}
+                spellCheck={false}
+                className={inputClass}
+                onChange={(event) => setForm({ ...form, [name]: event.target.value })}
+              />
+            </label>
+          ))}
+          <label className="flex flex-col gap-1">
+            <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+              {s.settings.apiKey}
+              {saved.hasKey && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="-my-1 text-muted-foreground"
+                  // What is saved, not what is typed: forgetting the key must not store a half-edited address.
+                  onClick={() => void submit({ ...saved, key: '' })}
+                >
+                  {s.settings.forgetKey}
+                </Button>
+              )}
+            </span>
+            <Input
+              type="password"
+              autoComplete="off"
+              value={key}
+              placeholder={saved.hasKey ? s.settings.keySaved : s.settings.keyNone}
+              className={inputClass}
+              onChange={(event) => setKey(event.target.value)}
+            />
+          </label>
+        </>
+      )}
+
+      {error && <p className="text-xs leading-[1.55] text-destructive">{error}</p>}
+      {dirty && (
+        <Button size="sm" className="self-end px-3" onClick={() => void submit({ ...form, ...(form.engine === 'api' && key && { key }) })}>
+          {s.settings.save}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 type SettingsProps = {
   open: boolean;
   s: Strings;
@@ -229,23 +362,11 @@ export function SettingsDialog({
         <div className="flex items-center justify-between gap-4">
           <span className="text-[13px] font-medium">{s.settings.language}</span>
           {/* Two languages, so a pair of buttons says it all; the first one picked is the system's own. */}
-          <div className="flex items-center gap-0.5 rounded-[10px] border bg-background p-[3px]">
-            {UI_LANGS.map((value) => (
-              <Button
-                key={value}
-                variant="ghost"
-                size="xs"
-                aria-pressed={lang === value}
-                className={cn(
-                  'rounded-[7px] px-2.5 text-muted-foreground',
-                  lang === value && 'bg-muted text-foreground',
-                )}
-                onClick={() => onLang(value)}
-              >
-                {LANG_NAMES[value]}
-              </Button>
-            ))}
-          </div>
+          <Choice
+            value={lang}
+            options={UI_LANGS.map((value) => ({ value, label: LANG_NAMES[value] }))}
+            onChange={onLang}
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -262,6 +383,8 @@ export function SettingsDialog({
             onDelete={onDeleteModel}
           />
         </div>
+
+        <AiEngineSection s={s} open={open} />
 
         <div className="flex flex-col gap-4">
           <p className="text-xs leading-[1.55] text-muted-foreground">{s.settings.promptsHint}</p>

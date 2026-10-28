@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import type { AiSettings, AiSettingsUpdate } from './api';
 import type { CliJob } from './cli';
 import type { UiLang } from './i18n';
 import type { Segment } from './subtitles';
@@ -28,7 +29,7 @@ const api = {
   exportAudio: (filePath: string): Promise<ExportedAudio> => ipcRenderer.invoke('audio:export', filePath),
   // Kills the ffmpeg behind the current extract or export; safe to call when there is none.
   cancelAudio: (): void => ipcRenderer.send('audio:cancel'),
-  // Kills the claude run behind summarize/chapters; safe to call when there is none.
+  // Stops the run behind summarize/chapters, whichever engine it is on; safe to call when there is none.
   cancelAi: (): void => ipcRenderer.send('ai:cancel'),
   // Asked once on startup: without a system ffmpeg neither conversion can run, and the window says so instead
   // of failing on the first click. The app ships no binary of its own — see audio.ts for why.
@@ -41,12 +42,16 @@ const api = {
   // Percentage of the extract/export ffmpeg is currently running.
   onAudioProgress: (listener: (percent: number) => void): (() => void) =>
     subscribe('audio:progress', (_event, percent: unknown) => listener(Number(percent))),
-  // Both run the local claude CLI in main: a summary of the plain transcript, chapters of the timestamped one.
+  // Both run in main on the engine the settings chose: a summary of the plain transcript, chapters of the timed one.
   // `prompt` is whatever the settings window holds; main falls back to the built-in instruction without one.
   summarize: (transcript: string, prompt: string): Promise<string> =>
     ipcRenderer.invoke('ai:run', 'summary', transcript, prompt),
   chapters: (timedTranscript: string, prompt: string): Promise<string> =>
     ipcRenderer.invoke('ai:run', 'chapters', timedTranscript, prompt),
+  // The engine settings without the key; the key goes one way only, inside an update.
+  getAiSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:settings'),
+  setAiSettings: (update: AiSettingsUpdate): Promise<{ settings: AiSettings } | { error: string }> =>
+    ipcRenderer.invoke('ai:settings:set', update),
   // Both return false when the user cancels the save dialog.
   saveText: (text: string, suggestedName: string): Promise<boolean> =>
     ipcRenderer.invoke('file:save', text, suggestedName),

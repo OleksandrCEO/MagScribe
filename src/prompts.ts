@@ -1,5 +1,5 @@
 /**
- * The instructions the local `claude` CLI gets. They live apart from `summary.ts` because the settings window
+ * The instructions the summary engine gets. They live apart from `summary.ts` because the settings window
  * shows them for editing, and the renderer cannot import a module that pulls in node:child_process.
  *
  * They are written in English on purpose: the interface may be translated one day, and the answer must follow the

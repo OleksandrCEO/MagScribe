@@ -25,26 +25,14 @@ import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { findGpu, isRealGpu, type Gpu } from '@/gpu';
 import { formatSize, pickUiLang, setUiLang, STRINGS, UI_LANGS, type UiLang } from '@/i18n';
-import {
-  deleteModel,
-  modelBytes,
-  modelStates,
-  MODELS,
-  MODEL_IDS,
-  recommendedModel,
-  type Device,
-  type ModelId,
-  type ModelState,
-} from '@/models';
+import { modelBytes, MODELS } from '@/models';
 import type { ExportedAudio, SelectedFile, Theme } from '@/preload';
 import type { AiTask, Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
   LANG_KEY,
-  MODEL_KEY,
   ModelPicker,
   SettingsDialog,
   readPrompts,
@@ -54,7 +42,8 @@ import {
 } from '@/settings';
 import { decodeInBrowser, SAMPLE_RATE } from '@/pcm';
 import { timecode, toSrt, toTimedText, type Segment } from '@/subtitles';
-import type { Language, WorkerRequest, WorkerResponse } from '@/worker';
+import { useWhisper } from '@/useWhisper';
+import type { Language } from '@/worker';
 import { cn } from 'cn';
 
 const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
@@ -140,7 +129,7 @@ type Job =
   | { kind: 'reading' | 'exporting' | 'saving'; percent: number }
   // The worker. `merging` is its last phase: the chunks are decoded and the overlaps are being stitched.
   | { kind: 'transcribing'; percent: number; merging: boolean }
-  | { kind: 'ai'; task: AiTask }; // the claude CLI, which is work too, but work that nothing can stop
+  | { kind: 'ai'; task: AiTask }; // the summary engine: work too, and minutes of it
 
 // One block above the pill for every long wait; `value` is undefined for stages that have no percentage.
 type Bar = { label: string; value?: number };
@@ -155,19 +144,8 @@ export default function App() {
     readSetting(LANG_KEY, UI_LANGS, pickUiLang(navigator.language)),
   );
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
-  const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the claude CLI gets
+  const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the summary engine gets
   const [language, setLanguage] = useState<Language>('uk');
-  const [download, setDownload] = useState(0);
-  // Which model this window works with, which ones are already on disk, and what the machine can run. `modelId`
-  // is null only for the moment the adapter is being probed, before anything decides anything.
-  const [modelId, setModelId] = useState<ModelId | null>(null);
-  const [models, setModels] = useState<Record<ModelId, ModelState>>({ small: 'none', turbo: 'none' });
-  const [gpu, setGpu] = useState<Gpu | null>(null);
-  const [started, setStarted] = useState(false); // a worker was spawned, i.e. the download was agreed to
-  const [askModel, setAskModel] = useState<ModelId | null>(null); // the «download the model?» window, and for which
-  const [model, setModel] = useState<{ adapter: string; encoder: string } | null>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
-  const [fallback, setFallback] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
   const [transcript, setTranscript] = useState('');
   // A run has put its text on screen. Separate from `transcript` because the panel is editable: selecting all
@@ -190,11 +168,26 @@ export default function App() {
   const [ffmpegReady, setFfmpegReady] = useState(true);
 
   const s = STRINGS[uiLang]; // every line this window shows
-  // What this machine will load: a software adapter is refused by the worker, so it ends up on wasm like a
-  // machine with no card at all — and that decides both the files and the size the window promises.
-  const device: Device = isRealGpu(gpu) ? 'webgpu' : 'wasm';
-  const fp16 = isRealGpu(gpu) && gpu.fp16;
-  const recommended = recommendedModel();
+  const {
+    modelId,
+    models,
+    device,
+    fp16,
+    recommended,
+    started,
+    download,
+    model,
+    modelError,
+    fallback,
+    modelStage,
+    askModel,
+    setAskModel,
+    transcribe,
+    restart,
+    chooseModel,
+    allowModel,
+    forgetModel,
+  } = useWhisper(s, uiLang);
 
   // The language of the recording, not of the interface: three bare words, each with a tooltip of its own.
   const speech: { value: Language; label: string; title: string }[] = [
@@ -205,105 +198,14 @@ export default function App() {
 
   // dragenter/dragleave also fire for children, so count the nesting instead of toggling on every event.
   const dragDepth = useRef(0);
-  const workerRef = useRef<Worker | null>(null);
-  const ready = useRef(false); // read inside the worker listener, which never sees state updates
   const startedAt = useRef(0);
   const stopped = useRef(false); // a cancelled ffmpeg rejects like a broken one; this tells the two apart
-  const aiStopped = useRef(false); // same for a killed claude: its rejection is not a failure to report
+  const aiStopped = useRef(false); // same for a stopped summary: its rejection is not a failure to report
   const covered = useRef(0); // seconds of audio the text already reaches, counted from the start of the file
-  const offset = useRef(0); // where the current run started; a resumed worker counts from its own zero
-  const kept = useRef(''); // the text a resumed run appends to
-  const resumed = useRef(false); // a resumed run has no timestamps for the part before it, so it offers no .srt
   const pendingFrom = useRef<number | undefined>(undefined); // what the click asked for while the model loaded
   const painted = useRef(0); // when the streaming text was last written into the panel, see PAINT_EVERY_MS
 
-  // Spawned on mount, and again after a stop: terminating is the only way out of a run, and it takes the
-  // loaded model with it, so the replacement starts loading at once instead of waiting for the next click.
-  const spawnWorker = (id: ModelId): void => {
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-    workerRef.current = worker;
-    ready.current = false;
-    setModel(null);
-    setDownload(0);
-    setStarted(true);
-
-    worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
-      const message = event.data;
-      if (message.type === 'download') setDownload(message.progress);
-      if (message.type === 'ready') {
-        setDownload(100);
-        setModel({ adapter: message.adapter, encoder: message.encoder });
-        // It is on disk now, so the settings window stops offering to download what is already here.
-        setModels((current) => ({ ...current, [id]: 'ready' }));
-        ready.current = true;
-      }
-      if (message.type === 'fallback') setFallback(s.error.fallback(message.from, message.reason));
-      if (message.type === 'progress') {
-        setJob({ kind: 'transcribing', percent: message.progress, merging: false });
-        covered.current = offset.current + message.covered;
-      }
-      if (message.type === 'merging') {
-        setJob((current) => (current?.kind === 'transcribing' ? { ...current, merging: true } : current));
-      }
-      if (message.type === 'partial') {
-        // More text is still coming, so the «stitching» the estimate announced a moment ago has not started.
-        setJob((current) =>
-          current?.kind === 'transcribing' && current.merging ? { ...current, merging: false } : current,
-        );
-        if (Date.now() - painted.current < PAINT_EVERY_MS) return;
-        painted.current = Date.now();
-        setTranscript(kept.current + message.text);
-        setRan(true);
-      }
-      if (message.type === 'result') {
-        const whole = kept.current + message.text;
-        setTranscript(whole);
-        setRan(true);
-        // A resumed run only has timestamps for the part it did, and half an .srt is worse than none.
-        setSegments(resumed.current ? [] : message.segments);
-        setSubtitles(resumed.current ? '' : toSrt(message.segments));
-        setResumeAt(null);
-        setJob(null);
-        setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-        window.api.notify('MagScribe', s.toast.transcribed(s.words(countWords(whole))));
-      }
-      if (message.type === 'error') {
-        // Before the model is up, the failure is permanent — keep it on screen instead of a toast that fades.
-        if (!ready.current) setModelError(message.message);
-        else toast.error(message.message);
-        setJob((current) => (current?.kind === 'transcribing' ? null : current));
-      }
-    });
-
-    // A worker that fails to load its own module never posts anything, and the window would wait forever.
-    worker.addEventListener('error', (event) => setModelError(event.message || s.error.workerFailed));
-
-    worker.postMessage({ type: 'load', lang: uiLang, model: id, offline: false } satisfies WorkerRequest);
-  };
-
-  // Mount only, and deliberately: one worker per window, and spawnWorker is re-created on every render.
   useEffect(() => {
-    // What this machine has, and what it already holds. A model in the cache loads without touching the
-    // network, so there is nothing to ask about; an empty cache means a download, and that is the person's
-    // call — see docs/concept.md. With nothing chosen yet, the adapter decides which one is offered.
-    void (async () => {
-      // The adapter first: which files a model would fetch here depends on it, and so does what counts as cached.
-      const adapter = await findGpu();
-      const state = await modelStates(isRealGpu(adapter) ? 'webgpu' : 'wasm', isRealGpu(adapter) && adapter.fp16);
-      const ready = MODEL_IDS.filter((id) => state[id] === 'ready');
-      const fits = recommendedModel();
-      // With nothing chosen yet: what this machine should run, unless it is not here and another one is —
-      // downloading a second model while the first sits in the cache helps nobody.
-      const first = ready.length === 0 || ready.includes(fits) ? fits : ready[0];
-      const pick = readSetting(MODEL_KEY, MODEL_IDS, first);
-
-      setGpu(adapter);
-      setModels(state);
-      setModelId(pick);
-      if (state[pick] === 'ready') spawnWorker(pick);
-      else setAskModel(pick);
-    })();
-
     void window.api.hasFfmpeg().then(setFfmpegReady);
     // The percentage of whichever ffmpeg run is going on; nothing else in main reports one.
     const unsubscribe = [
@@ -315,19 +217,9 @@ export default function App() {
         ),
       ),
       window.api.onCloseAsk(() => setCloseAsked(true)),
-      window.api.onGpuGone((message) => {
-        setModelError(s.error.restartApp(message));
-        setJob((current) => (current?.kind === 'transcribing' ? null : current));
-      }),
     ];
 
-    return () => {
-      workerRef.current?.terminate();
-      unsubscribe.forEach((remove) => remove());
-    };
-    // Mount only: a running worker is not re-spawned because the window changed language, and the listeners
-    // above are registered once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => unsubscribe.forEach((remove) => remove());
   }, []);
 
   useEffect(() => {
@@ -348,7 +240,7 @@ export default function App() {
 
   // ffmpeg or the worker holding the file: this is what freezes the text and what the stop button can stop.
   const running = job !== null && job.kind !== 'ai';
-  // The claude run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
+  // The summary run counts as work too: it lasts minutes, the machine must not doze off in it, closing the
   // window has to ask, and nothing new may start underneath it and then be overwritten by its answer.
   const busy = job !== null;
 
@@ -404,7 +296,7 @@ export default function App() {
   /** Stops whatever is running and keeps whatever it has already produced. */
   const stop = (): void => {
     setConfirming(false);
-    // A claude run has nothing to resume and no worker to replace: kill the child and drop its answer.
+    // A summary run has nothing to resume and no worker to replace: cancel it and drop its answer.
     if (job?.kind === 'ai') {
       aiStopped.current = true;
       window.api.cancelAi();
@@ -413,9 +305,7 @@ export default function App() {
     }
     stopped.current = true;
     window.api.cancelAudio(); // kills ffmpeg if we are still converting
-    // The pipeline runs chunk after chunk inside a single await and never looks at a flag, so the worker has to go.
-    workerRef.current?.terminate();
-    if (modelId) spawnWorker(modelId);
+    restart(); // the run in flight resolves with nothing, and a fresh worker loads the model again
 
     // Where the text got to: the run can pick up there instead of starting the file over.
     const reached = covered.current;
@@ -442,24 +332,21 @@ export default function App() {
   };
 
   const startTranscription = async (from?: number): Promise<void> => {
-    if (!file || !workerRef.current) return;
+    if (!file) return;
 
     const resuming = from !== undefined && from > 0;
     clearResults(resuming);
-    kept.current = resuming ? `${transcript.trimEnd()} ` : '';
-    resumed.current = resuming;
-    offset.current = from ?? 0;
-    covered.current = offset.current;
+    const kept = resuming ? `${transcript.trimEnd()} ` : ''; // the text a resumed run appends to
+    const offset = from ?? 0; // a resumed run counts its seconds from its own zero
+    covered.current = offset;
 
     stopped.current = false;
     setPending(false);
     setJob({ kind: 'reading', percent: 0 });
     startedAt.current = Date.now();
+    let samples: Float32Array;
     try {
-      const samples = await readSamples(file.path, from);
-      if (stopped.current) return; // the stop caught up while ffmpeg was finishing: the worker is a new one
-      setJob({ kind: 'transcribing', percent: 0, merging: false });
-      workerRef.current.postMessage({ type: 'transcribe', audio: samples, language } satisfies WorkerRequest, [samples.buffer]);
+      samples = await readSamples(file.path, from);
     } catch (error) {
       // A killed ffmpeg rejects like a broken one. With no ffmpeg at all, a failure here means the browser
       // could not read this particular file, and the answer to that is the same window as a missing binary.
@@ -467,9 +354,46 @@ export default function App() {
         if (ffmpegReady) failWith(error);
         else setNoFfmpeg(s.ffmpegDialog.cannotRead);
       }
-    } finally {
-      // Only our own reading: by now the worker may already be transcribing, or a stop may have cleared it.
       setJob((current) => (current?.kind === 'reading' ? null : current));
+      return;
+    }
+    if (stopped.current) return; // the stop caught up while ffmpeg was finishing: the worker is a new one
+
+    setJob({ kind: 'transcribing', percent: 0, merging: false });
+    try {
+      const result = await transcribe(samples, language, {
+        onProgress: (percent, reached) => {
+          setJob({ kind: 'transcribing', percent, merging: false });
+          covered.current = offset + reached;
+        },
+        onMerging: () =>
+          setJob((current) => (current?.kind === 'transcribing' ? { ...current, merging: true } : current)),
+        onPartial: (text) => {
+          // More text is still coming, so the «stitching» the estimate announced a moment ago has not started.
+          setJob((current) =>
+            current?.kind === 'transcribing' && current.merging ? { ...current, merging: false } : current,
+          );
+          if (Date.now() - painted.current < PAINT_EVERY_MS) return;
+          painted.current = Date.now();
+          setTranscript(kept + text);
+          setRan(true);
+        },
+      });
+      if (!result) return; // stopped, or the model went away — the stop and the status line already said so
+
+      const whole = kept + result.text;
+      setTranscript(whole);
+      setRan(true);
+      // A resumed run only has timestamps for the part it did, and half an .srt is worse than none.
+      setSegments(resuming ? [] : result.segments);
+      setSubtitles(resuming ? '' : toSrt(result.segments));
+      setResumeAt(null);
+      setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
+      window.api.notify('MagScribe', s.toast.transcribed(s.words(countWords(whole))));
+    } catch (error) {
+      failWith(error);
+    } finally {
+      setJob((current) => (current?.kind === 'transcribing' ? null : current));
     }
   };
 
@@ -482,42 +406,6 @@ export default function App() {
     }
     setPending(true);
     if (!started && modelId) setAskModel(modelId); // nothing loading yet: ask before anything is downloaded
-  };
-
-  /**
-   * Makes `id` the model of this window: loaded straight away when it is on disk, asked about when it is not.
-   * A model that still has to be downloaded is not remembered until the download is agreed to — otherwise
-   * «Not now» would leave the window pointing at a model it does not have.
-   */
-  const chooseModel = (id: ModelId): void => {
-    if (models[id] !== 'ready') {
-      setAskModel(id);
-      return;
-    }
-    setModelId(id);
-    writeSetting(MODEL_KEY, id);
-    setAskModel(null);
-    spawnWorker(id);
-  };
-
-  /** Yes to the download — of whichever model the question ended up offering, which is also the one kept. */
-  const allowModel = (): void => {
-    if (askModel === null) return;
-    const id = askModel;
-    setAskModel(null);
-    setModelId(id);
-    writeSetting(MODEL_KEY, id);
-    spawnWorker(id);
-  };
-
-  const forgetModel = async (id: ModelId): Promise<void> => {
-    try {
-      await deleteModel(id);
-      setModels((current) => ({ ...current, [id]: 'none' }));
-      toast.success(s.toast.modelDeleted);
-    } catch (error) {
-      failWith(error);
-    }
   };
 
   const convertToAudio = async (): Promise<void> => {
@@ -579,7 +467,7 @@ export default function App() {
     }
   };
 
-  // Both stages run the local claude CLI: a summary of the plain text, chapters of the timestamped lines.
+  // Both stages run on the summary engine in main: a summary of the plain text, chapters of the timed lines.
   const runAi = async (task: AiTask): Promise<void> => {
     aiStopped.current = false;
     setJob({ kind: 'ai', task });
@@ -588,7 +476,7 @@ export default function App() {
         task === 'summary'
           ? await window.api.summarize(transcript, prompts.summary)
           : await window.api.chapters(toTimedText(segments), prompts.chapters);
-      if (aiStopped.current) return; // stopped while claude was writing: the answer is not wanted any more
+      if (aiStopped.current) return; // stopped while the engine was writing: the answer is not wanted any more
       if (task === 'summary') setSummary(text);
       else setChapters(text);
       setView(task);
@@ -616,20 +504,6 @@ export default function App() {
     // this runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, model, busy]);
-
-  // Downloading is only half the wait: the weights still have to be parsed and compiled onto the GPU.
-  // `checking` lasts a few milliseconds, until the adapter probe and the cache lookup come back.
-  const modelStage = modelId === null
-    ? 'checking'
-    : !started
-      ? 'absent'
-      : modelError
-        ? 'failed'
-        : model
-          ? 'ready'
-          : download >= 100
-            ? 'preparing'
-            : 'downloading';
 
   /** The job in words, or — when there is no job — whatever the model itself is still doing. */
   const barFor = (current: Job | null): Bar | null => {
@@ -672,7 +546,7 @@ export default function App() {
   const stage = audio || job?.kind === 'exporting' ? 'audio' : ran || running ? 'text' : 'pick';
   // Nothing switches the view by itself: a run ends on the transcript, and the pill opens the rest.
   const screen: Screen = stage === 'text' ? view : stage;
-  const done = transcript !== '' && !running; // the text can still be copied and saved while claude thinks
+  const done = transcript !== '' && !running; // the text can still be copied and saved while the engine thinks
   const onSubtitles = screen === 'subtitles'; // the text screen and the .srt screen share one set of buttons
 
   // Electron takes the window title from the document, so the taskbar can say which screen is open.
@@ -964,7 +838,7 @@ export default function App() {
                   aria-label={s.ui.stop}
                   className="-my-1 size-5.5 rounded-[6px] text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                   // Only a run that is decoding has something to lose; reading the file, encoding a track or
-                  // waiting on claude stops without a word.
+                  // waiting on the summary stops without a word.
                   onClick={() => (job?.kind === 'transcribing' ? setConfirming(true) : stop())}
                 >
                   <XIcon className="size-3.5" />
@@ -1017,10 +891,7 @@ export default function App() {
           {modelError ? (
             <StatusLink
               label={s.ui.retry}
-              onClick={() => {
-                setModelError(null);
-                if (modelId) spawnWorker(modelId);
-              }}
+              onClick={restart}
             />
           ) : modelStage === 'absent' && modelId ? (
             <StatusLink label={s.ui.downloadModel} onClick={() => setAskModel(modelId)} />
@@ -1163,7 +1034,7 @@ export default function App() {
         cancel={s.modelDialog.cancel}
         confirm={s.modelDialog.confirm(formatSize(modelBytes(askModel ?? recommended, device, fp16), s))}
         close={s.ui.close}
-        body={s.modelDialog.body(MODELS[recommended].name, isRealGpu(gpu))}
+        body={s.modelDialog.body(MODELS[recommended].name, device === 'webgpu')}
         tone="default"
         onConfirm={allowModel}
         // «Not now» also calls off a click that was waiting for the model it just declined.
@@ -1213,7 +1084,7 @@ export default function App() {
         fp16={fp16}
         modelBusy={busy || modelStage === 'downloading' || modelStage === 'preparing'}
         onModel={chooseModel}
-        onDeleteModel={(id) => void forgetModel(id)}
+        onDeleteModel={(id) => void forgetModel(id).then(() => toast.success(s.toast.modelDeleted), failWith)}
         prompts={prompts}
         onPrompts={setPrompts}
         onClose={() => setDialog(null)}

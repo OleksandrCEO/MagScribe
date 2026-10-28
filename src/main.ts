@@ -26,6 +26,8 @@ import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { MAX_BROWSER_DECODE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
 import { AI_TASKS, cancelAi } from './summary';
+import { aiSettings, saveAiSettings } from './aiSettings';
+import { parseUpdate, type AiSettings } from './api';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
 // returns null (or only SwiftShader) and transcription drops to the much slower wasm engine.
@@ -511,8 +513,19 @@ ipcMain.handle('ai:run', (_event, task: unknown, transcript: unknown, prompt: un
   return run(transcript, edited);
 });
 
-// A five-minute run the window stopped waiting for; the handler above rejects with `killed` and the window knows.
+// A five-minute run the window stopped waiting for; the handler above rejects and the window drops it unread.
 ipcMain.on('ai:cancel', cancelAi);
+
+// The engine behind ai:run. The window gets the settings without the key, and a failed save comes back as words
+// to show next to the form rather than as a rejection Electron would wrap in its own «Error invoking…» prefix.
+ipcMain.handle('ai:settings', (): AiSettings => aiSettings());
+ipcMain.handle('ai:settings:set', (_event, update: unknown): { settings: AiSettings } | { error: string } => {
+  try {
+    return { settings: saveAiSettings(parseUpdate(update)) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
