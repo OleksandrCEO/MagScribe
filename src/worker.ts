@@ -87,6 +87,10 @@ const load = async (model: ModelId): Promise<void> => {
       transcriber = await pipeline('automatic-speech-recognition', MODELS[model].repo, {
         device,
         dtype: { encoder_model, decoder_model_merged },
+        // onnxruntime-web 1.26's extended QDQ pass (`TransposeDQWeightsForMatMulNBits`) cannot find the scale of
+        // the int8 merged decoder's tied embedding and refuses the session. `basic` skips that pass; on the int8
+        // encoder it measured the same speed as the default level.
+        session_options: decoder_model_merged === 'int8' ? { graphOptimizationLevel: 'basic' } : undefined,
         progress_callback: reportDownload,
       });
       post({ type: 'ready', adapter: picked.adapter, encoder: encoder_model });
