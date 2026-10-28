@@ -160,6 +160,7 @@ const uk = {
     title: 'Завантажити модель?',
     cancel: 'Не зараз',
     confirm: (size: string): string => `Завантажити ${size}`,
+    useKey: 'Або розшифровувати через API — вставити ключ',
     body: (name: string, gpu: boolean): string[] => [
       'Для розшифровки потрібна модель. Вона завантажується один раз із huggingface.co і лишається в кеші ' +
         'застосунку — змінити чи видалити її можна в налаштуваннях.',
@@ -217,6 +218,9 @@ const uk = {
     keyNone: 'не потрібен для власного сервера',
     forgetKey: 'Забути ключ',
     save: 'Зберегти',
+    check: 'Перевірити',
+    checking: 'Перевіряю…',
+    checkOk: 'відповідає',
     // Keyed by task, so prompts.ts holds only the storage keys and the settings window needs no mapping.
     prompt: { summary: 'Конспект — кнопка «Опрацювати»', chapters: 'Таймкоди — для формування розділів' },
   },
@@ -410,6 +414,7 @@ const en: typeof uk = {
     title: 'Download the model?',
     cancel: 'Not now',
     confirm: (size: string): string => `Download ${size}`,
+    useKey: 'Or transcribe over an API — paste a key',
     body: (name: string, gpu: boolean): string[] => [
       'Transcription needs a model. It is downloaded once from huggingface.co and stays in the app cache — ' +
         'the settings window changes it or deletes it again.',
@@ -466,6 +471,9 @@ const en: typeof uk = {
     keyNone: 'not needed for your own server',
     forgetKey: 'Forget the key',
     save: 'Save',
+    check: 'Check',
+    checking: 'Checking…',
+    checkOk: 'answers',
     prompt: { summary: 'Summary — the “Process” button', chapters: 'Chapters — for building the sections' },
   },
 

@@ -32,6 +32,7 @@ import type { AiTask, Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
+  KeyBranch,
   LANG_KEY,
   ModelPicker,
   SettingsDialog,
@@ -425,6 +426,15 @@ export default function App() {
     }
     setPending(true);
     if (!started && modelId) setAskModel(modelId); // nothing loading yet: ask before anything is downloaded
+  };
+
+  /** The first-run answer «a key instead of the model»: the API is the engine now, and a waiting click goes on. */
+  const switchToApi = (settings: AiSettings): void => {
+    setEngines(settings);
+    setAskModel(null);
+    if (!pending) return;
+    setPending(false);
+    void startTranscription(pendingFrom.current, 'api');
   };
 
   const convertToAudio = async (): Promise<void> => {
@@ -1083,6 +1093,8 @@ export default function App() {
           busy={false}
           onChange={setAskModel}
         />
+        {/* Keyed by the question, so every time it is asked the branch starts folded, with the settings fresh. */}
+        <KeyBranch key={askModel} s={s} onSaved={switchToApi} />
       </ConfirmDialog>
       <ConfirmDialog
         open={noFfmpeg !== null}
@@ -1113,6 +1125,7 @@ export default function App() {
         device={device}
         fp16={fp16}
         modelBusy={busy || modelStage === 'downloading' || modelStage === 'preparing'}
+        busy={busy}
         onModel={chooseModel}
         onDeleteModel={(id) => void forgetModel(id).then(() => toast.success(s.toast.modelDeleted), failWith)}
         prompts={prompts}

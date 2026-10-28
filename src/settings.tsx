@@ -3,7 +3,7 @@ import { CheckIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { AI_ENGINES, SPEECH_ENGINES, type AiSettings, type AiSettingsUpdate } from '@/api';
+import { AI_ENGINES, SPEECH_ENGINES, type AiSettings, type AiSettingsUpdate, type ApiCheck } from '@/api';
 import { formatSize, LANG_NAMES, UI_LANGS, type Strings, type UiLang } from '@/i18n';
 import { modelBytes, MODEL_IDS, MODELS, type Device, type ModelId, type ModelState } from '@/models';
 import { DEFAULT_PROMPTS, PROMPT_FIELDS, type Prompts } from '@/prompts';
@@ -223,12 +223,21 @@ function Choice<T extends string>({
 
 const inputClass = 'text-[13px] md:text-[13px] dark:bg-background';
 
+type EnginesProps = {
+  s: Strings;
+  open: boolean;
+  busy: boolean; // a run is going on: «Перевірити» would race its request for the one cancel handle in main
+  // The first-run form: transcription over the API and nothing else to choose, so the engine rows, the summary
+  // model and «Перевірити» stay out of it. Called with what was saved.
+  onSaved?: (settings: AiSettings) => void;
+};
+
 /**
  * The engines for the transcription and for «Опрацювати» with the chapters. Their settings live in main, the key
  * with them, so the form is loaded on every open and saved with a button: the key field is write-only, and
  * half-typed values are no setting. Both API engines share the address and the key.
  */
-function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
+function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
   const [saved, setSaved] = useState<AiSettings | null>(null);
   const [form, setForm] = useState<Omit<AiSettingsUpdate, 'key'>>({
     engine: 'claude',
@@ -239,23 +248,33 @@ function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
   });
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [check, setCheck] = useState<ApiCheck | 'running' | null>(null);
 
   const show = (settings: AiSettings): void => {
     const { engine, speech, baseUrl, model, speechModel } = settings;
     setSaved(settings);
-    setForm({ engine, speech, baseUrl, model, speechModel });
+    setForm({ engine, speech: onSaved ? 'api' : speech, baseUrl, model, speechModel });
     setKey('');
     setError(null);
+    setCheck(null);
   };
 
   useEffect(() => {
     if (open) void window.api.getAiSettings().then(show);
+    // Loaded on every open and on nothing else; show is a new function on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const submit = async (update: AiSettingsUpdate): Promise<void> => {
     const answer = await window.api.setAiSettings(update);
     if ('error' in answer) setError(answer.error);
+    else if (onSaved) onSaved(answer.settings);
     else show(answer.settings);
+  };
+
+  const runCheck = async (): Promise<void> => {
+    setCheck('running');
+    setCheck(await window.api.checkApi());
   };
 
   if (!saved) return null;
@@ -264,27 +283,33 @@ function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
   const fields = [
     { name: 'baseUrl', label: s.settings.baseUrl, placeholder: 'https://api.openai.com/v1', shown: usesApi },
     { name: 'speechModel', label: s.settings.speechModel, placeholder: 'whisper-1', shown: form.speech === 'api' },
-    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini', shown: form.engine === 'api' },
+    { name: 'model', label: s.settings.apiModel, placeholder: 'gpt-4o-mini', shown: form.engine === 'api' && !onSaved },
   ] as const;
+  // A new address drops the stored key on save, so the field stops calling it saved as soon as the address changes.
+  const keyKept = saved.hasKey && form.baseUrl === saved.baseUrl;
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
-        <Choice
-          value={form.speech}
-          options={SPEECH_ENGINES.map((value) => ({ value, label: s.settings.speechEngines[value] }))}
-          onChange={(speech) => setForm({ ...form, speech })}
-        />
-      </div>
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
-        <Choice
-          value={form.engine}
-          options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
-          onChange={(engine) => setForm({ ...form, engine })}
-        />
-      </div>
+      {!onSaved && (
+        <>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
+            <Choice
+              value={form.speech}
+              options={SPEECH_ENGINES.map((value) => ({ value, label: s.settings.speechEngines[value] }))}
+              onChange={(speech) => setForm({ ...form, speech })}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
+            <Choice
+              value={form.engine}
+              options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
+              onChange={(engine) => setForm({ ...form, engine })}
+            />
+          </div>
+        </>
+      )}
 
       {usesApi && (
         <>
@@ -320,7 +345,7 @@ function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
               type="password"
               autoComplete="off"
               value={key}
-              placeholder={saved.hasKey ? s.settings.keySaved : s.settings.keyNone}
+              placeholder={keyKept ? s.settings.keySaved : s.settings.keyNone}
               className={inputClass}
               onChange={(event) => setKey(event.target.value)}
             />
@@ -329,7 +354,17 @@ function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
       )}
 
       {error && <p className="text-xs leading-[1.55] text-destructive">{error}</p>}
-      {dirty && (
+      {Array.isArray(check) &&
+        check.map(({ task, error: failure }) => (
+          <p
+            key={task}
+            className={cn('text-xs leading-[1.55]', failure ? 'text-destructive' : 'text-muted-foreground')}
+          >
+            {task === 'speech' ? s.settings.speechEngine : s.settings.aiEngine}: {failure ?? s.settings.checkOk}
+          </p>
+        ))}
+      {/* Unsaved changes are saved first; what is checked is always what is stored. */}
+      {dirty ? (
         <Button
           size="sm"
           className="self-end px-3"
@@ -337,6 +372,19 @@ function EnginesSection({ s, open }: { s: Strings; open: boolean }) {
         >
           {s.settings.save}
         </Button>
+      ) : (
+        usesApi &&
+        !onSaved && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-end px-3"
+            disabled={busy || check === 'running'}
+            onClick={() => void runCheck()}
+          >
+            {check === 'running' ? s.settings.checking : s.settings.check}
+          </Button>
+        )
       )}
     </div>
   );
@@ -353,6 +401,7 @@ type SettingsProps = {
   device: Device;
   fp16: boolean;
   modelBusy: boolean; // the model is loading or working: swapping or deleting it mid-run is nobody's intent
+  busy: boolean; // any run, the model's or the API's
   onModel: (id: ModelId) => void;
   onDeleteModel: (id: ModelId) => void;
   prompts: Prompts;
@@ -371,6 +420,7 @@ export function SettingsDialog({
   device,
   fp16,
   modelBusy,
+  busy,
   onModel,
   onDeleteModel,
   prompts,
@@ -405,7 +455,7 @@ export function SettingsDialog({
           />
         </div>
 
-        <EnginesSection s={s} open={open} />
+        <EnginesSection s={s} open={open} busy={busy} />
 
         <div className="flex flex-col gap-4">
           <p className="text-xs leading-[1.55] text-muted-foreground">{s.settings.promptsHint}</p>
@@ -441,6 +491,22 @@ export function SettingsDialog({
       </div>
     </Modal>
   );
+}
+
+/**
+ * The other answer to «download the model?»: transcribe over an API instead. Folded away behind one line, since
+ * the question is about the model; unfolded, it is the engines form cut down to the address, the model and the key.
+ */
+export function KeyBranch({ s, onSaved }: { s: Strings; onSaved: (settings: AiSettings) => void }) {
+  const [unfolded, setUnfolded] = useState(false);
+  if (!unfolded) {
+    return (
+      <Button variant="ghost" size="xs" className="self-start text-muted-foreground" onClick={() => setUnfolded(true)}>
+        {s.modelDialog.useKey}
+      </Button>
+    );
+  }
+  return <EnginesSection s={s} open busy={false} onSaved={onSaved} />;
 }
 
 type ConfirmProps = {

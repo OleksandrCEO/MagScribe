@@ -21,6 +21,9 @@ type EngineFields = { engine: AiEngine; speech: SpeechEngine; baseUrl: string; m
 /** What the settings window may know: everything but the key itself. */
 export type AiSettings = EngineFields & { hasKey: boolean };
 
+/** What «Перевірити» found: one entry per engine on the API, with the error in words or null when it answered. */
+export type ApiCheck = { task: 'speech' | 'summary'; error: string | null }[];
+
 /** What the settings window sends. `key` left out keeps the stored one, an empty one forgets it. */
 export type AiSettingsUpdate = EngineFields & { key?: string };
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { AiSettings, AiSettingsUpdate } from './api';
+import type { AiSettings, AiSettingsUpdate, ApiCheck } from './api';
 import type { CliJob } from './cli';
 import type { UiLang } from './i18n';
 import type { Segment } from './subtitles';
@@ -55,6 +55,8 @@ const api = {
   getAiSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:settings'),
   setAiSettings: (update: AiSettingsUpdate): Promise<{ settings: AiSettings } | { error: string }> =>
     ipcRenderer.invoke('ai:settings:set', update),
+  // One short request per API engine to the saved settings; never rejects, each failure comes back as words.
+  checkApi: (): Promise<ApiCheck> => ipcRenderer.invoke('ai:check'),
   // Both return false when the user cancels the save dialog.
   saveText: (text: string, suggestedName: string): Promise<boolean> =>
     ipcRenderer.invoke('file:save', text, suggestedName),

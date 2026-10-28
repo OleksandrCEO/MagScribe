@@ -62,7 +62,7 @@ const runClaude = (prompt: string, input: string): Promise<string> =>
   });
 
 /** Sends the transcript to the OpenAI-compatible API from the settings. The key never leaves main. */
-const runApi = async (prompt: string, input: string): Promise<string> => {
+export const runApi = async (prompt: string, input: string): Promise<string> => {
   const { model } = aiSettings();
   if (!model) throw new Error(t().error.apiIncomplete);
   const reply = readReply(await postApi('/chat/completions', JSON.stringify(chatRequest(model, prompt, input))));

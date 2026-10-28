@@ -25,9 +25,9 @@ import { cancelFfmpeg, discardExport, discardStaleExports, exportAudio, extractA
 import { pickUiLang, setUiLang, t, UI_LANGS, type UiLang } from './i18n';
 import { API_CHUNK_S, MAX_BROWSER_DECODE, SAMPLE_RATE } from './pcm';
 import { MAX_PROMPT, type AiTask } from './prompts';
-import { AI_TASKS, cancelAi } from './summary';
+import { AI_TASKS, cancelAi, runApi } from './summary';
 import { aiSettings, saveAiSettings } from './aiSettings';
-import { parseUpdate, type AiSettings } from './api';
+import { parseUpdate, type AiSettings, type ApiCheck } from './api';
 import { transcribeApi } from './speech';
 
 // Linux hides WebGPU behind a flag and needs the Vulkan backend explicitly; without both, requestAdapter()
@@ -538,6 +538,25 @@ ipcMain.handle('ai:settings:set', (_event, update: unknown): { settings: AiSetti
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
+});
+
+// «Перевірити»: one real request to the saved API per engine that uses it, through the same code as the work
+// itself — a second of silence to the transcription (which also shows whether the model sends timestamps), a
+// one-word chat to the summary. Each failure is the same sentence the work would have shown.
+ipcMain.handle('ai:check', async (): Promise<ApiCheck> => {
+  const { engine, speech } = aiSettings();
+  const attempt = async (task: ApiCheck[number]['task'], request: () => Promise<unknown>) => {
+    try {
+      await request();
+      return { task, error: null };
+    } catch (error) {
+      return { task, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  const results: ApiCheck = [];
+  if (speech === 'api') results.push(await attempt('speech', () => transcribeApi(new Float32Array(SAMPLE_RATE), null)));
+  if (engine === 'api') results.push(await attempt('summary', () => runApi('Reply with the single word OK.', 'ping')));
+  return results;
 });
 
 // This method will be called when Electron has finished
