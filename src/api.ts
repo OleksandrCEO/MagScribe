@@ -7,7 +7,8 @@
 import { t } from './i18n.ts';
 import { toSegments, type Segment } from './subtitles.ts';
 
-export const AI_ENGINES = ['claude', 'api'] as const;
+// `claude` and `codex` are the CLIs of those names; `off` hides «Опрацювати» and the chapters.
+export const AI_ENGINES = ['claude', 'codex', 'api', 'off'] as const;
 export type AiEngine = (typeof AI_ENGINES)[number];
 // `api` is any OpenAI-compatible `/audio/transcriptions`; Deepgram speaks a format of its own.
 export const SPEECH_ENGINES = ['whisper', 'api', 'deepgram'] as const;

@@ -32,10 +32,11 @@ import type { AiTask, Prompts } from '@/prompts';
 import {
   AboutDialog,
   ConfirmDialog,
-  KeyBranch,
   LANG_KEY,
   ModelPicker,
   SettingsDialog,
+  SetupDialog,
+  SETUP_KEY,
   readPrompts,
   readSetting,
   writePrompts,
@@ -149,6 +150,8 @@ export default function App() {
   const [dialog, setDialog] = useState<'settings' | 'about' | null>(null);
   // The engines and the API as main keeps them (no key); null for the moment until main answers.
   const [engines, setEngines] = useState<AiSettings | null>(null);
+  // Whether the first-run form was answered; until it is, it stands in for «download the model?».
+  const [setupDone, setSetupDone] = useState(() => readSetting(SETUP_KEY, ['done'], '') === 'done');
   const [prompts, setPrompts] = useState<Prompts>(readPrompts); // the instructions the summary engine gets
   const [language, setLanguage] = useState<Language>('uk');
   const [job, setJob] = useState<Job | null>(null); // the one thing the window is doing, or nothing
@@ -429,13 +432,28 @@ export default function App() {
     if (!started && modelId) setAskModel(modelId); // nothing loading yet: ask before anything is downloaded
   };
 
-  /** The first-run answer «a key instead of the model»: the API is the engine now, and a waiting click goes on. */
-  const switchToApi = (settings: AiSettings): void => {
+  /**
+   * The first-run form answered. The model is downloaded on that word; with an API, a waiting click goes on
+   * straight away. A click waiting for the model goes on when it has loaded, as after «download the model?».
+   */
+  const finishSetup = (settings: AiSettings): void => {
+    writeSetting(SETUP_KEY, 'done');
+    setSetupDone(true);
     setEngines(settings);
+    if (settings.speech === 'whisper') {
+      allowModel();
+      return;
+    }
     setAskModel(null);
     if (!pending) return;
     setPending(false);
     void startTranscription(pendingFrom.current, 'api');
+  };
+
+  // «Not now» to either question also calls off a click that was waiting for the model.
+  const declineModel = (): void => {
+    setAskModel(null);
+    setPending(false);
   };
 
   const convertToAudio = async (): Promise<void> => {
@@ -985,7 +1003,7 @@ export default function App() {
                   onClick={() => setView(onSubtitles ? 'transcript' : 'subtitles')}
                 />
               )}
-              {onSubtitles ? chaptersButton : summaryButton}
+              {engines?.engine !== 'off' && (onSubtitles ? chaptersButton : summaryButton)}
             </>
           )}
           {screen === 'chapters' && (
@@ -1069,8 +1087,15 @@ export default function App() {
           window.api.answerClose(false);
         }}
       />
+      <SetupDialog
+        s={s}
+        open={askModel !== null && !setupDone}
+        modelSize={formatSize(modelBytes(askModel ?? recommended, device, fp16), s)}
+        onDone={finishSetup}
+        onClose={declineModel}
+      />
       <ConfirmDialog
-        open={askModel !== null}
+        open={askModel !== null && setupDone}
         title={s.modelDialog.title}
         cancel={s.modelDialog.cancel}
         confirm={s.modelDialog.confirm(formatSize(modelBytes(askModel ?? recommended, device, fp16), s))}
@@ -1078,11 +1103,7 @@ export default function App() {
         body={s.modelDialog.body(MODELS[recommended].name, device === 'webgpu')}
         tone="default"
         onConfirm={allowModel}
-        // «Not now» also calls off a click that was waiting for the model it just declined.
-        onClose={() => {
-          setAskModel(null);
-          setPending(false);
-        }}
+        onClose={declineModel}
       >
         <ModelPicker
           s={s}
@@ -1094,8 +1115,6 @@ export default function App() {
           busy={false}
           onChange={setAskModel}
         />
-        {/* Keyed by the question, so every time it is asked the branch starts folded, with the settings fresh. */}
-        <KeyBranch key={askModel} s={s} onSaved={switchToApi} />
       </ConfirmDialog>
       <ConfirmDialog
         open={noFfmpeg !== null}

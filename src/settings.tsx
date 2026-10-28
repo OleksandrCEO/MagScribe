@@ -22,6 +22,7 @@ import { cn } from 'cn';
 // Read by the window and by the command line's hidden one, which shares the origin and so the person's choices.
 export const LANG_KEY = 'lang';
 export const MODEL_KEY = 'model';
+export const SETUP_KEY = 'setup';
 
 // localStorage is keyed per origin and survives restarts. It can still throw (blocked storage), and a setting
 // that does not come back is not worth an error on screen.
@@ -262,9 +263,9 @@ type EnginesProps = {
   s: Strings;
   open: boolean;
   busy: boolean; // a run is going on: «Перевірити» would race its request for the one cancel handle in main
-  // The first-run form: transcription over an API and nothing else to choose, so the engine rows, the summary
-  // and «Перевірити» stay out of it. Called with what was saved.
-  onSaved?: (settings: AiSettings) => void;
+  // The first-run form: the two engines and a key for each API, no addresses, models or «Перевірити».
+  // `modelSize` labels the model's button, `onDone` gets what was saved.
+  setup?: { modelSize: string; onDone: (settings: AiSettings) => void };
 };
 
 /**
@@ -272,7 +273,7 @@ type EnginesProps = {
  * model and key. Their settings live in main, the keys with them, so the form is loaded on every open and saved
  * with a button: the key fields are write-only, and half-typed values are no setting.
  */
-function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
+function EnginesSection({ s, open, busy, setup }: EnginesProps) {
   const [saved, setSaved] = useState<AiSettings | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [keys, setKeys] = useState<Record<ApiRole, string>>({ speech: '', summary: '' });
@@ -281,7 +282,7 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
 
   const show = (settings: AiSettings): void => {
     setSaved(settings);
-    setForm(onSaved ? withApiSpeech(formOf(settings), settings.speech) : formOf(settings));
+    setForm(formOf(settings));
     setKeys({ speech: '', summary: '' });
     setError(null);
     setCheck(null);
@@ -289,14 +290,12 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
 
   useEffect(() => {
     if (open) void window.api.getAiSettings().then(show);
-    // Loaded on every open and on nothing else; show is a new function on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const submit = async (update: AiSettingsUpdate): Promise<void> => {
     const answer = await window.api.setAiSettings(update);
     if ('error' in answer) setError(answer.error);
-    else if (onSaved) onSaved(answer.settings);
+    else if (setup) setup.onDone(answer.settings);
     else show(answer.settings);
   };
 
@@ -359,19 +358,24 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
 
     return (
       <div className="flex flex-col gap-2.5 border-l-2 pl-3">
-        <Choice
-          value={preset?.name ?? ''}
-          options={[
-            ...presets.map(({ name }) => ({ value: name, label: name })),
-            { value: '', label: s.settings.custom },
-          ]}
-          onChange={(name) => pick(role, presets.find((candidate) => candidate.name === name) ?? null)}
-        />
-        <p className="text-xs leading-[1.55] text-muted-foreground">
-          {rich(role === 'speech' ? s.settings.speechHint : s.settings.summaryHint)}
-        </p>
-        {field('baseUrl', s.settings.baseUrl, <Input {...text('baseUrl', 'https://…/v1')} />)}
-        {field(
+        {/* The first-run form already said «Deepgram» on the engine row. */}
+        {!(setup && role === 'speech') && (
+          <Choice
+            value={preset?.name ?? ''}
+            options={[
+              ...presets.map(({ name }) => ({ value: name, label: name })),
+              { value: '', label: s.settings.custom },
+            ]}
+            onChange={(name) => pick(role, presets.find((candidate) => candidate.name === name) ?? null)}
+          />
+        )}
+        {!setup && (
+          <p className="text-xs leading-[1.55] text-muted-foreground">
+            {rich(role === 'speech' ? s.settings.speechHint : s.settings.summaryHint)}
+          </p>
+        )}
+        {!setup && field('baseUrl', s.settings.baseUrl, <Input {...text('baseUrl', 'https://…/v1')} />)}
+        {!setup && field(
           'model',
           role === 'speech' ? s.settings.speechModel : s.settings.apiModel,
           <>
@@ -398,7 +402,13 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
             autoComplete="off"
             value={keys[role]}
             // A new address drops the stored key on save, so it is «saved» only while the address is the same.
-            placeholder={stored.hasKey && value.baseUrl === stored.baseUrl ? s.settings.keySaved : s.settings.keyNone}
+            placeholder={
+              stored.hasKey && value.baseUrl === stored.baseUrl
+                ? s.settings.keySaved
+                : setup
+                  ? s.setup.keyLater
+                  : s.settings.keyNone
+            }
             className={inputClass}
             onChange={(event) => setKeys({ ...keys, [role]: event.target.value })}
           />
@@ -409,30 +419,38 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
 
   return (
     <div className="flex flex-col gap-2.5">
-      {!onSaved && (
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
-          <Choice
-            value={form.speech === 'whisper' ? 'whisper' : 'api'}
-            options={(['whisper', 'api'] as const).map((value) => ({ value, label: s.settings.speechEngines[value] }))}
-            onChange={(value) =>
-              setForm(value === 'whisper' ? { ...form, speech: 'whisper' } : withApiSpeech(form, saved.speech))
-            }
-          />
-        </div>
-      )}
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[13px] font-medium">{s.settings.speechEngine}</span>
+        <Choice
+          value={form.speech === 'whisper' ? 'whisper' : 'api'}
+          options={[
+            { value: 'whisper', label: setup ? s.setup.model(setup.modelSize) : s.settings.speechEngines.whisper },
+            // With nothing set up yet, the API is Deepgram (withApiSpeech), so the first run names it.
+            { value: 'api', label: setup ? DEEPGRAM.name : s.settings.speechEngines.api },
+          ]}
+          onChange={(value) =>
+            setForm(value === 'whisper' ? { ...form, speech: 'whisper' } : withApiSpeech(form, saved.speech))
+          }
+        />
+      </div>
       {form.speech !== 'whisper' && connection('speech')}
-      {!onSaved && (
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
-          <Choice
-            value={form.engine}
-            options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
-            onChange={(engine) => setForm({ ...form, engine })}
-          />
-        </div>
-      )}
-      {!onSaved && form.engine === 'api' && connection('summary')}
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[13px] font-medium">{s.settings.aiEngine}</span>
+        <Choice
+          value={form.engine}
+          options={AI_ENGINES.map((value) => ({ value, label: s.settings.engines[value] }))}
+          // An API with nothing set up starts on the first preset, as the first-run form has no address field.
+          onChange={(engine) =>
+            setForm({
+              ...form,
+              engine,
+              ...(engine === 'api' &&
+                !form.apis.summary.baseUrl && { apis: { ...form.apis, summary: fill(SUMMARY_PROVIDERS[0]) } }),
+            })
+          }
+        />
+      </div>
+      {form.engine === 'api' && connection('summary')}
 
       {error && <p className="text-xs leading-[1.55] text-destructive">{error}</p>}
       {Array.isArray(check) &&
@@ -445,9 +463,9 @@ function EnginesSection({ s, open, busy, onSaved }: EnginesProps) {
           </p>
         ))}
       {/* Unsaved changes are saved first; what is checked is always what is stored. */}
-      {dirty || onSaved ? (
+      {dirty || setup ? (
         <Button size="sm" className="self-end px-3" onClick={save}>
-          {s.settings.save}
+          {setup ? s.setup.done : s.settings.save}
         </Button>
       ) : (
         inUse.length > 0 && (
@@ -569,20 +587,24 @@ export function SettingsDialog({
   );
 }
 
+type SetupProps = {
+  s: Strings;
+  open: boolean;
+  modelSize: string;
+  onDone: (settings: AiSettings) => void;
+  onClose: () => void;
+};
+
 /**
- * The other answer to «download the model?»: transcribe over an API instead. Folded away behind one line, since
- * the question is about the model; unfolded, it is the engines form cut down to the transcription's API.
+ * The first run, in place of «download the model?»: how to transcribe, what writes the summary, and a key for
+ * whichever of them goes to an API. Everything else waits in the settings window.
  */
-export function KeyBranch({ s, onSaved }: { s: Strings; onSaved: (settings: AiSettings) => void }) {
-  const [unfolded, setUnfolded] = useState(false);
-  if (!unfolded) {
-    return (
-      <Button variant="ghost" size="xs" className="self-start text-muted-foreground" onClick={() => setUnfolded(true)}>
-        {s.modelDialog.useKey}
-      </Button>
-    );
-  }
-  return <EnginesSection s={s} open busy={false} onSaved={onSaved} />;
+export function SetupDialog({ s, open, modelSize, onDone, onClose }: SetupProps) {
+  return (
+    <Modal open={open} title={s.ui.settings} close={s.ui.close} onClose={onClose}>
+      <EnginesSection s={s} open={open} busy={false} setup={{ modelSize, onDone }} />
+    </Modal>
+  );
 }
 
 type ConfirmProps = {

@@ -34,6 +34,12 @@ const update = { engine: 'claude', speech: 'whisper', apis: { speech: off, summa
 const summaryApi = (summary: object) => ({ ...update, engine: 'api', apis: { speech: off, summary } });
 const speechApi = (speech: object, engine = 'api') => ({ ...update, speech: engine, apis: { speech, summary: off } });
 
+test('parseUpdate takes the codex command and a summary switched off', () => {
+  assert.equal(parseUpdate({ ...update, engine: 'codex' }).engine, 'codex');
+  assert.equal(parseUpdate({ ...update, engine: 'off' }).engine, 'off');
+  assert.deepEqual(rolesInUse({ engine: 'off', speech: 'whisper' }), []);
+});
+
 test('parseUpdate normalises a good update and keeps a missing key missing', () => {
   assert.deepEqual(
     parseUpdate(summaryApi({ baseUrl: 'https://openrouter.ai/api/v1/', model: ' gpt-6-luna ' })),

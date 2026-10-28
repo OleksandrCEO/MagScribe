@@ -154,13 +154,19 @@ const uk = {
     ],
   },
 
+  // The first time the model would be asked about: both engines and the key on one screen, the rest in settings.
+  setup: {
+    model: (size: string): string => `Модель · ${size}`,
+    keyLater: 'можна пізніше — у налаштуваннях',
+    done: 'Готово',
+  },
+
   // The one thing the app downloads by itself, so it is asked for out loud — and only when the weights are not
   // in the cache already, because loading a cached model downloads nothing.
   modelDialog: {
     title: 'Завантажити модель?',
     cancel: 'Не зараз',
     confirm: (size: string): string => `Завантажити ${size}`,
-    useKey: 'Або розшифровувати через API — вставити ключ',
     body: (name: string, gpu: boolean): string[] => [
       'Для розшифровки потрібна модель. Вона завантажується один раз із huggingface.co і лишається в кеші ' +
         'застосунку — змінити чи видалити її можна в налаштуваннях.',
@@ -206,7 +212,7 @@ const uk = {
     speechEngine: 'Розшифровка',
     speechEngines: { whisper: 'Модель розпізнавання', api: 'API' },
     aiEngine: 'Конспект і таймкоди',
-    engines: { claude: 'Команда claude', api: 'API' },
+    engines: { claude: 'claude', codex: 'codex', api: 'API', off: 'Вимкнено' },
     custom: 'Локально',
     speechHint:
       'Deepgram — або «Локально»: будь-який OpenAI-сумісний `/audio/transcriptions` з таймкодами (`verbose_json`, як '
@@ -248,9 +254,13 @@ const uk = {
     tooLongForMemory: (need: string, free: string) =>
       `Запис задовгий для вільної памʼяті: розшифровка потребує ~${need} ГБ, а вільно ~${free} ГБ. `
       + 'Розріжте файл на частини й розшифруйте кожну окремо — або звільніть памʼять і спробуйте ще раз.',
-    claudeMissing: 'Команду claude не знайдено. Встанови Claude Code CLI і перевір, що вона є у PATH.',
+    cliMissing: {
+      claude: 'Команду claude не знайдено. Встанови Claude Code CLI і перевір, що вона є у PATH.',
+      codex: 'Команду codex не знайдено. Встанови Codex CLI і перевір, що вона є у PATH.',
+    },
     replyTooBig: 'Відповідь не вмістилася у 8 МБ',
-    claudeTimeout: (seconds: number): string => `claude не вклався у ${seconds} секунд`,
+    cliTimeout: (cli: string, seconds: number): string => `${cli} не вклався у ${seconds} секунд`,
+    summaryOff: 'Конспект вимкнено в налаштуваннях.',
     apiBadUrl: 'Адреса API має починатися з https:// (http:// — лише для localhost) і бути без логіна та параметрів.',
     apiIncomplete: 'Для API потрібні адреса й модель.',
     apiKeyMalformed: 'У ключі не може бути пробілів чи переносів рядка.',
@@ -414,11 +424,16 @@ const en: typeof uk = {
     ],
   },
 
+  setup: {
+    model: (size: string): string => `Model · ${size}`,
+    keyLater: 'can wait — it is in the settings',
+    done: 'Done',
+  },
+
   modelDialog: {
     title: 'Download the model?',
     cancel: 'Not now',
     confirm: (size: string): string => `Download ${size}`,
-    useKey: 'Or transcribe over an API — paste a key',
     body: (name: string, gpu: boolean): string[] => [
       'Transcription needs a model. It is downloaded once from huggingface.co and stays in the app cache — ' +
         'the settings window changes it or deletes it again.',
@@ -463,7 +478,7 @@ const en: typeof uk = {
     speechEngine: 'Transcription',
     speechEngines: { whisper: 'Speech model', api: 'API' },
     aiEngine: 'Summary and chapters',
-    engines: { claude: 'claude command', api: 'API' },
+    engines: { claude: 'claude', codex: 'codex', api: 'API', off: 'Off' },
     custom: 'Local',
     speechHint:
       'Deepgram — or “Local”: any OpenAI-compatible `/audio/transcriptions` with timestamps (`verbose_json`, like '
@@ -501,9 +516,13 @@ const en: typeof uk = {
     tooLongForMemory: (need: string, free: string) =>
       `The recording is too long for the free memory: transcribing it needs ~${need} GB and ~${free} GB is `
       + 'free. Split the file and transcribe the parts, or free some memory and try again.',
-    claudeMissing: 'The claude command was not found. Install the Claude Code CLI and check that it is on PATH.',
+    cliMissing: {
+      claude: 'The claude command was not found. Install the Claude Code CLI and check that it is on PATH.',
+      codex: 'The codex command was not found. Install the Codex CLI and check that it is on PATH.',
+    },
     replyTooBig: 'The answer did not fit into 8 MB',
-    claudeTimeout: (seconds: number): string => `claude did not finish within ${seconds} seconds`,
+    cliTimeout: (cli: string, seconds: number): string => `${cli} did not finish within ${seconds} seconds`,
+    summaryOff: 'The summary is switched off in the settings.',
     apiBadUrl: 'The API address must start with https:// (http:// only for localhost), with no login or parameters.',
     apiIncomplete: 'The API needs an address and a model.',
     apiKeyMalformed: 'A key cannot contain spaces or line breaks.',
