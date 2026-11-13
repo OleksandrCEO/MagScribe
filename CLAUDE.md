@@ -64,8 +64,13 @@ The algorithm, every time:
 1. **Only when the developer says so.** `gh release create v<version> --target <full sha> --title "MagScribe <version>"
    --notes-file /tmp/agent/release-notes.md`, with `<version>` the `package.json` of that pushed commit. The notes:
    a table «system → file» for the four installers, then how to install each (SmartScreen «Докладніше» → «Усе одно
-   запустити»; `xattr -cr /Applications/magscribe.app`; `sudo apt install ./<deb>`; where the `magscribe` command
-   comes from) and ffmpeg (`winget` / `brew` / `apt`). A published non-prerelease becomes Latest by itself.
+   запустити»; `sudo apt install ./<deb>`; where the `magscribe` command comes from) and ffmpeg (`winget` / `brew` /
+   `apt`). A published non-prerelease becomes Latest by itself.
+   **macOS installs with one Terminal line**, its URL pinned to this release:
+   `curl -fL https://github.com/OleksandrCEO/MagScribe/releases/download/v<version>/magscribe-<version>-macos-arm64.zip -o /tmp/magscribe.zip && ditto -xk /tmp/magscribe.zip /Applications && open /Applications/magscribe.app`.
+   A browser marks the download as quarantined, and macOS then calls the unsigned app «пошкоджено» and offers only
+   the Trash, with no «Open Anyway»; curl sets no quarantine. `xattr -cr /Applications/magscribe.app` stays in the
+   notes as the fix for a zip that came through the browser.
 2. Publishing starts **Build**: three runners, about four minutes. Wait for it (`gh run watch`), then check that
    the release holds all four files.
 3. **The flake, in the same sitting.** The `.deb`'s sha256 comes from GitHub, nothing to download:
